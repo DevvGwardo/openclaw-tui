@@ -20,8 +20,8 @@ type PaletteCommand struct {
 // PaletteCommands is the canonical list of slash commands for the palette.
 var PaletteCommands = []PaletteCommand{
 	{Name: "help", Desc: "Show help", Shortcut: ""},
-	{Name: "theme", Desc: "Switch theme", HasArgs: true, SubOptions: []string{"ocean", "amber", "rose", "forest"}},
-	{Name: "bg", Desc: "Background animation", HasArgs: true, SubOptions: []string{"off", "starfield", "tunnel", "plasma", "fire", "matrix", "ocean", "cube", "skibidi", "sigma", "npc", "ohio", "rizz", "gyatt", "amogus", "bussin"}},
+	{Name: "theme", Desc: "Switch theme", HasArgs: true, SubOptions: []string{"ocean", "amber", "rose", "forest", "aquarium"}},
+	{Name: "bg", Desc: "Background animation", HasArgs: true, SubOptions: []string{"off", "starfield", "tunnel", "plasma", "fire", "matrix", "ocean", "cube", "aquarium", "skibidi", "sigma", "npc", "ohio", "rizz", "gyatt", "amogus", "bussin"}},
 	{Name: "model", Desc: "Switch model", Shortcut: ""},
 	{Name: "session", Desc: "Switch session", HasArgs: true},
 	{Name: "agent", Desc: "Switch agent", Shortcut: ""},
@@ -353,11 +353,28 @@ func (cp *CommandPaletteModel) viewSub(screenWidth, screenHeight int) string {
 	selectedStyle := lipgloss.NewStyle().Foreground(p.Primary).Bold(true)
 	dimStyle := lipgloss.NewStyle().Foreground(p.FgMuted)
 
+	// Apply scrolling to sub-options
+	visible := cp.subItems
+	scrollOffset := 0
+	if len(visible) > paletteMaxItems {
+		if cp.subSel >= scrollOffset+paletteMaxItems {
+			scrollOffset = cp.subSel - paletteMaxItems + 1
+		}
+		if cp.subSel < scrollOffset {
+			scrollOffset = cp.subSel
+		}
+		visible = visible[scrollOffset:]
+		if len(visible) > paletteMaxItems {
+			visible = visible[:paletteMaxItems]
+		}
+	}
+
 	var lines []string
-	for i, opt := range cp.subItems {
+	for i, opt := range visible {
+		idx := i + scrollOffset
 		prefix := "  "
 		var style lipgloss.Style
-		if i == cp.subSel {
+		if idx == cp.subSel {
 			prefix = "▸ "
 			style = selectedStyle
 		} else {
@@ -368,7 +385,15 @@ func (cp *CommandPaletteModel) viewSub(screenWidth, screenHeight int) string {
 		lines = append(lines, line)
 	}
 
-	footer := dimStyle.Render(fmt.Sprintf(" %d options", len(cp.subItems)))
+	showing := len(visible)
+	total := len(cp.subItems)
+	var footerText string
+	if showing < total {
+		footerText = fmt.Sprintf(" %d of %d options", showing, total)
+	} else {
+		footerText = fmt.Sprintf(" %d options", total)
+	}
+	footer := dimStyle.Render(footerText)
 	footer = padRight(footer, innerWidth)
 
 	var content strings.Builder
