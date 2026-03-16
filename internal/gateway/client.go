@@ -311,6 +311,10 @@ func (c *Client) handleEvent(frame Frame) {
 		if err := json.Unmarshal(frame.Payload, &btw); err == nil {
 			c.emit(GatewayEvent{Type: "btw", BTW: &btw})
 		}
+
+	default:
+		// Forward unrecognized events so the TUI can at least see them
+		c.emit(GatewayEvent{Type: frame.Event, Payload: frame.Payload})
 	}
 }
 

@@ -672,7 +672,8 @@ func (m Model) sendMessage(text string) tea.Cmd {
 			Message:    text,
 			Thinking:   m.thinking,
 		}
-		_, err := m.gateway.Request(gateway.MethodChatSend, params)
+		// Use fire-and-forget — the actual response comes as chat events
+		err := m.gateway.RequestAsync(gateway.MethodChatSend, params)
 		return SendResultMsg{Err: err}
 	}
 }
