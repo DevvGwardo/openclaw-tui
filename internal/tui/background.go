@@ -25,7 +25,7 @@ const (
 // BgModes lists all available background modes in cycle order.
 var BgModes = []BgMode{BgOff, BgStarfield, BgTunnel, BgPlasma, BgFire, BgMatrix, BgOcean, BgCube}
 
-// --- Pixel buffer for half-block rendering ---
+// --- Pixel buffer for half-block rendering (color-intensive modes) ---
 
 type pixel struct {
 	r, g, b uint8
@@ -69,7 +69,6 @@ func (pb *pixelBuffer) clear() {
 }
 
 // renderRow renders terminal row y using half-block characters.
-// Top pixel = pixels[y*2], bottom pixel = pixels[y*2+1], character = ▀
 func (pb *pixelBuffer) renderRow(y int) string {
 	if pb.width <= 0 || y < 0 || y >= pb.height {
 		return ""
@@ -136,6 +135,221 @@ func (pb *pixelBuffer) bgColorAt(row, col int) (int, int, int) {
 	return r, g, b
 }
 
+// --- Braille buffer for high-resolution shape rendering ---
+// Unicode Braille (U+2800..U+28FF) encodes a 2×4 dot grid per character cell.
+// Each cell = 2 pixels wide × 4 pixels tall = 8 subpixels.
+
+// brailleDotBit maps (dx, dy) within a 2×4 cell to the braille bit flag.
+var brailleDotBit = [2][4]rune{
+	{0x01, 0x02, 0x04, 0x40}, // left column  (dx=0): rows 0-3
+	{0x08, 0x10, 0x20, 0x80}, // right column (dx=1): rows 0-3
+}
+
+type pixColor struct {
+	r, g, b uint8
+}
+
+type brailleBuffer struct {
+	termW, termH int          // terminal dimensions
+	pixW, pixH   int          // pixel dimensions (termW*2, termH*4)
+	dots         []bool       // [pixH * pixW] flat array
+	colors       []pixColor   // [pixH * pixW] color per dot
+}
+
+func newBrailleBuffer(termW, termH int) *brailleBuffer {
+	if termW <= 0 || termH <= 0 {
+		return &brailleBuffer{}
+	}
+	pixW := termW * 2
+	pixH := termH * 4
+	return &brailleBuffer{
+		termW:  termW,
+		termH:  termH,
+		pixW:   pixW,
+		pixH:   pixH,
+		dots:   make([]bool, pixW*pixH),
+		colors: make([]pixColor, pixW*pixH),
+	}
+}
+
+func (bb *brailleBuffer) clear() {
+	for i := range bb.dots {
+		bb.dots[i] = false
+		bb.colors[i] = pixColor{}
+	}
+}
+
+func (bb *brailleBuffer) set(px, py int, r, g, b uint8) {
+	if px < 0 || px >= bb.pixW || py < 0 || py >= bb.pixH {
+		return
+	}
+	idx := py*bb.pixW + px
+	bb.dots[idx] = true
+	bb.colors[idx] = pixColor{r, g, b}
+}
+
+func (bb *brailleBuffer) get(px, py int) (bool, pixColor) {
+	if px < 0 || px >= bb.pixW || py < 0 || py >= bb.pixH {
+		return false, pixColor{}
+	}
+	idx := py*bb.pixW + px
+	return bb.dots[idx], bb.colors[idx]
+}
+
+// renderRow renders a terminal row using braille characters with averaged fg colors.
+func (bb *brailleBuffer) renderRow(termY int) string {
+	if bb.termW <= 0 || termY < 0 || termY >= bb.termH {
+		return ""
+	}
+	var sb strings.Builder
+	sb.Grow(bb.termW * 30)
+
+	basePixY := termY * 4
+
+	// Track runs of identical char+color for batching
+	type cellInfo struct {
+		ch   rune
+		r, g, b uint8
+	}
+	var prevCell cellInfo
+	prevCell.ch = 0xFFFF // impossible sentinel
+	run := 0
+
+	flush := func() {
+		if run <= 0 {
+			return
+		}
+		if prevCell.ch == 0x2800 {
+			// Empty braille = space
+			sb.WriteString(strings.Repeat(" ", run))
+		} else {
+			fmt.Fprintf(&sb, "\x1b[38;2;%d;%d;%dm", prevCell.r, prevCell.g, prevCell.b)
+			for k := 0; k < run; k++ {
+				sb.WriteRune(prevCell.ch)
+			}
+			sb.WriteString("\x1b[0m")
+		}
+		run = 0
+	}
+
+	for tx := 0; tx < bb.termW; tx++ {
+		basePixX := tx * 2
+
+		var pattern rune
+		var totalR, totalG, totalB int
+		var dotCount int
+
+		for dx := 0; dx < 2; dx++ {
+			for dy := 0; dy < 4; dy++ {
+				px := basePixX + dx
+				py := basePixY + dy
+				if px < bb.pixW && py < bb.pixH {
+					lit, c := bb.get(px, py)
+					if lit {
+						pattern |= brailleDotBit[dx][dy]
+						totalR += int(c.r)
+						totalG += int(c.g)
+						totalB += int(c.b)
+						dotCount++
+					}
+				}
+			}
+		}
+
+		ch := rune(0x2800 + pattern)
+		var cr, cg, cb uint8
+		if dotCount > 0 {
+			cr = uint8(totalR / dotCount)
+			cg = uint8(totalG / dotCount)
+			cb = uint8(totalB / dotCount)
+		}
+
+		cur := cellInfo{ch, cr, cg, cb}
+		if cur == prevCell {
+			run++
+		} else {
+			flush()
+			prevCell = cur
+			run = 1
+		}
+	}
+	flush()
+	return sb.String()
+}
+
+// bgColorAt returns an averaged background color for compositing text over braille.
+func (bb *brailleBuffer) bgColorAt(row, col int) (int, int, int) {
+	if col < 0 || col >= bb.termW || row < 0 || row >= bb.termH {
+		return 6, 6, 10
+	}
+	baseX := col * 2
+	baseY := row * 4
+	var totalR, totalG, totalB, count int
+	for dy := 0; dy < 4; dy++ {
+		for dx := 0; dx < 2; dx++ {
+			px := baseX + dx
+			py := baseY + dy
+			if px < bb.pixW && py < bb.pixH {
+				lit, c := bb.get(px, py)
+				if lit {
+					totalR += int(c.r)
+					totalG += int(c.g)
+					totalB += int(c.b)
+					count++
+				}
+			}
+		}
+	}
+	if count == 0 {
+		return 6, 6, 10
+	}
+	return totalR / count, totalG / count, totalB / count
+}
+
+// drawLine draws a line in the braille buffer using Bresenham's algorithm.
+func (bb *brailleBuffer) drawLine(x0, y0, x1, y1 int, r, g, b uint8) {
+	dx := x1 - x0
+	dy := y1 - y0
+	if dx < 0 {
+		dx = -dx
+	}
+	if dy < 0 {
+		dy = -dy
+	}
+	sx := 1
+	if x0 > x1 {
+		sx = -1
+	}
+	sy := 1
+	if y0 > y1 {
+		sy = -1
+	}
+
+	err := dx - dy
+	steps := 0
+	maxSteps := dx + dy + 1
+	if maxSteps > 4000 {
+		maxSteps = 4000
+	}
+
+	for steps < maxSteps {
+		bb.set(x0, y0, r, g, b)
+		if x0 == x1 && y0 == y1 {
+			break
+		}
+		e2 := 2 * err
+		if e2 > -dy {
+			err -= dy
+			x0 += sx
+		}
+		if e2 < dx {
+			err += dx
+			y0 += sy
+		}
+		steps++
+	}
+}
+
 // --- State types ---
 
 type star3d struct {
@@ -160,7 +374,7 @@ type cubeState struct {
 	history        [][8][2]float64 // projected vertex history for trails
 }
 
-// bgCell represents a single background cell for character-based effects (matrix).
+// bgCell represents a single background cell for character-based effects.
 type bgCell struct {
 	ch rune
 	fg [3]uint8
@@ -174,8 +388,11 @@ type BackgroundModel struct {
 	height int
 	frame  int
 
-	// Pixel buffer for half-block modes
+	// Pixel buffer for half-block modes (color-intensive)
 	pb *pixelBuffer
+
+	// Braille buffer for shape-intensive modes (starfield, cube)
+	bb *brailleBuffer
 
 	// Starfield state
 	stars []star3d
@@ -183,7 +400,7 @@ type BackgroundModel struct {
 	// Fire state
 	fireHeat []float64 // width * (height*2) heat values
 
-	// Matrix state (character-based, not pixel)
+	// Matrix state
 	matrixCols []matrixCol
 
 	// Cube state
@@ -214,7 +431,6 @@ func NewBackgroundModel(theme Theme) BackgroundModel {
 
 // fastSin returns sin using the pre-computed table.
 func (b *BackgroundModel) fastSin(v float64) float64 {
-	// Normalize to 0..1024
 	idx := int(v*1024.0/(2.0*math.Pi)) % 1024
 	if idx < 0 {
 		idx += 1024
@@ -284,21 +500,49 @@ func (b *BackgroundModel) ensurePixelBuffer() {
 	}
 }
 
+func (b *BackgroundModel) ensureBrailleBuffer() {
+	if b.bb == nil || b.bb.termW != b.width || b.bb.termH != b.height {
+		b.bb = newBrailleBuffer(b.width, b.height)
+	}
+}
+
+// isBrailleMode returns true if the mode uses braille rendering.
+func (b *BackgroundModel) isBrailleMode() bool {
+	switch b.mode {
+	case BgStarfield, BgCube:
+		return true
+	}
+	return false
+}
+
+// isPixelMode returns true if the mode uses the pixel buffer (half-block rendering).
+func (b *BackgroundModel) isPixelMode() bool {
+	switch b.mode {
+	case BgTunnel, BgPlasma, BgFire, BgOcean:
+		return true
+	}
+	return false
+}
+
+// isCharMode returns true if the mode uses character grid rendering.
+func (b *BackgroundModel) isCharMode() bool {
+	return b.mode == BgMatrix
+}
+
 func (b *BackgroundModel) initMode() {
-	b.ensurePixelBuffer()
+	if b.isPixelMode() {
+		b.ensurePixelBuffer()
+	}
+	if b.isBrailleMode() {
+		b.ensureBrailleBuffer()
+	}
 	switch b.mode {
 	case BgStarfield:
 		b.initStarfield()
-	case BgTunnel:
-		// no extra init needed
-	case BgPlasma:
-		// no extra init needed
 	case BgFire:
 		b.initFire()
 	case BgMatrix:
 		b.initMatrix()
-	case BgOcean:
-		// no extra init needed
 	case BgCube:
 		b.initCube()
 	}
@@ -345,13 +589,13 @@ func dimColor(r, g, b uint8, scale float64) (uint8, uint8, uint8) {
 	return uint8(float64(r) * scale), uint8(float64(g) * scale), uint8(float64(b) * scale)
 }
 
-// --- Starfield (3D warp speed) ---
+// --- Starfield (3D warp speed — braille rendering) ---
 
 func (b *BackgroundModel) initStarfield() {
 	if b.width == 0 || b.height == 0 {
 		return
 	}
-	count := 250
+	count := 350 // more stars — braille can show them all as fine dots
 	b.stars = make([]star3d, count)
 	for i := range b.stars {
 		b.stars[i] = b.newStar3d(true)
@@ -365,9 +609,9 @@ func (b *BackgroundModel) newStar3d(randomZ bool) star3d {
 	}
 	tint := 0
 	r := b.rng.Float64()
-	if r < 0.08 {
+	if r < 0.10 {
 		tint = 1 // blue
-	} else if r < 0.14 {
+	} else if r < 0.18 {
 		tint = 2 // yellow
 	}
 	return star3d{
@@ -381,40 +625,46 @@ func (b *BackgroundModel) newStar3d(randomZ bool) star3d {
 }
 
 func (b *BackgroundModel) updateStarfield() {
-	b.ensurePixelBuffer()
-	b.pb.clear()
+	b.ensureBrailleBuffer()
+	b.bb.clear()
 
-	cx := float64(b.width) / 2.0
-	cy := float64(b.height) // pixel-y center (double res)
+	if b.width == 0 || b.height == 0 {
+		return
+	}
+
+	// Braille pixel space: pixW = width*2, pixH = height*4
+	pixW := float64(b.bb.pixW)
+	pixH := float64(b.bb.pixH)
+	cx := pixW / 2.0
+	cy := pixH / 2.0
 
 	for i := range b.stars {
 		s := &b.stars[i]
 
-		// Project current position before moving
+		// Project to braille pixel space
 		sx := cx + (s.x/s.z)*cx
 		sy := cy + (s.y/s.z)*cy
 
-		// Store previous screen position for trails
 		prevSX := s.prevSX
 		prevSY := s.prevSY
 		s.prevSX = sx
 		s.prevSY = sy
 
 		// Move star toward viewer
-		s.z -= 0.018
+		s.z -= 0.016
 		if s.z <= 0.005 {
 			b.stars[i] = b.newStar3d(false)
 			continue
 		}
 
-		// Check bounds
-		if sx < -2 || sx >= float64(b.width)+2 || sy < -2 || sy >= float64(b.height*2)+2 {
+		// Check bounds (with margin)
+		if sx < -4 || sx >= pixW+4 || sy < -4 || sy >= pixH+4 {
 			b.stars[i] = b.newStar3d(false)
 			continue
 		}
 
-		// Brightness increases exponentially as z approaches 0
-		brightness := math.Pow(1.0-s.z, 3.0)
+		// Brightness: exponential as z→0
+		brightness := math.Pow(1.0-s.z, 2.5)
 		if brightness > 1.0 {
 			brightness = 1.0
 		}
@@ -423,70 +673,77 @@ func (b *BackgroundModel) updateStarfield() {
 		var cr, cg, cb float64
 		switch s.colorTint {
 		case 1: // blue tint
-			cr, cg, cb = 0.6, 0.7, 1.0
+			cr, cg, cb = 0.55, 0.65, 1.0
 		case 2: // yellow tint
-			cr, cg, cb = 1.0, 0.95, 0.6
+			cr, cg, cb = 1.0, 0.92, 0.55
 		default: // white
 			cr, cg, cb = 1.0, 1.0, 1.0
 		}
 
-		// Dim to keep text readable
-		maxBright := 0.55
+		maxBright := 0.6
 		br := brightness * maxBright
 		r := uint8(cr * br * 255)
 		g := uint8(cg * br * 255)
 		bv := uint8(cb * br * 255)
 
-		// Draw star
 		ix := int(sx)
 		iy := int(sy)
-		b.pb.set(ix, iy, r, g, bv)
 
-		// Close stars are bigger (2x2 pixel block)
-		if s.z < 0.2 {
-			b.pb.set(ix+1, iy, r, g, bv)
-			b.pb.set(ix, iy+1, r, g, bv)
-			b.pb.set(ix+1, iy+1, r, g, bv)
+		// Draw star as a single braille dot — fine point of light
+		b.bb.set(ix, iy, r, g, bv)
+
+		// Close stars get a small cross pattern for brightness
+		if s.z < 0.15 {
+			b.bb.set(ix+1, iy, r, g, bv)
+			b.bb.set(ix-1, iy, r, g, bv)
+			b.bb.set(ix, iy+1, r, g, bv)
+			b.bb.set(ix, iy-1, r, g, bv)
+		} else if s.z < 0.3 {
+			// Medium stars: 2-dot cluster
+			b.bb.set(ix+1, iy, r, g, bv)
 		}
 
-		// Motion trail (draw line from previous to current position)
-		if prevSX >= 0 && prevSY >= 0 && s.z < 0.6 {
-			trailLen := 3
-			if s.z < 0.15 {
-				trailLen = 5
+		// Motion trail — thin line from previous to current
+		if prevSX >= 0 && prevSY >= 0 && s.z < 0.55 {
+			trailSteps := 6
+			if s.z < 0.12 {
+				trailSteps = 12
+			} else if s.z < 0.3 {
+				trailSteps = 8
 			}
-			for t := 1; t <= trailLen; t++ {
-				frac := float64(t) / float64(trailLen+1)
+			for t := 1; t <= trailSteps; t++ {
+				frac := float64(t) / float64(trailSteps+1)
 				tx := int(sx + (prevSX-sx)*frac)
 				ty := int(sy + (prevSY-sy)*frac)
-				fade := (1.0 - frac) * br * 0.5
+				fade := (1.0 - frac) * br * 0.45
 				tr := uint8(cr * fade * 255)
 				tg := uint8(cg * fade * 255)
 				tb := uint8(cb * fade * 255)
-				b.pb.set(tx, ty, tr, tg, tb)
+				b.bb.set(tx, ty, tr, tg, tb)
 			}
 		}
 	}
 
-	// Speed lines at edges
-	if b.frame%3 == 0 {
-		edgeW := b.width / 8
-		for k := 0; k < 4; k++ {
-			x := b.rng.Intn(edgeW)
+	// Speed lines at edges — thin braille dot streaks
+	if b.frame%2 == 0 {
+		edgeW := b.bb.pixW / 6
+		for k := 0; k < 6; k++ {
+			px := b.rng.Intn(edgeW)
 			if b.rng.Intn(2) == 0 {
-				x = b.width - 1 - x
+				px = b.bb.pixW - 1 - px
 			}
-			py := b.rng.Intn(b.height * 2)
-			for j := 0; j < 3+b.rng.Intn(4); j++ {
-				fade := 0.15 * (1.0 - float64(j)/7.0)
+			py := b.rng.Intn(b.bb.pixH)
+			lineLen := 4 + b.rng.Intn(8)
+			for j := 0; j < lineLen; j++ {
+				fade := 0.18 * (1.0 - float64(j)/float64(lineLen))
 				v := uint8(fade * 255)
-				b.pb.set(x, py+j, v, v, v)
+				b.bb.set(px, py+j, v, v, v)
 			}
 		}
 	}
 }
 
-// --- Tunnel (3D wormhole) ---
+// --- Tunnel (3D wormhole — half-block, color-intensive) ---
 
 func (b *BackgroundModel) updateTunnel() {
 	b.ensurePixelBuffer()
@@ -512,33 +769,22 @@ func (b *BackgroundModel) updateTunnel() {
 			dx := float64(x) - cx - wobX
 			dy := float64(py) - cy - wobY
 
-			// Distance from center
 			dist := math.Sqrt(dx*dx + dy*dy)
 			if dist < 0.5 {
 				dist = 0.5
 			}
 
-			// Angle
 			angle := math.Atan2(dy, dx)
-
-			// Tunnel mapping: depth from distance
 			depth := 80.0 / dist
 
-			// Tunnel texture coordinates
 			u := angle/(2.0*math.Pi) + 0.5
 			v := depth + t*2.0
-
-			// Undulating radius
 			undulate := 1.0 + 0.15*b.fastSin(angle*3.0+t*1.5)
 			v *= undulate
 
-			// Ring pattern: alternating bands
 			ring := b.fastSin(v * 4.0 * math.Pi)
-
-			// Brightness based on depth (closer = brighter)
 			depthBright := 1.0 / (1.0 + depth*0.15)
 
-			// Color: interpolate primary (near) to secondary (far) based on depth
 			depthFrac := depth / 5.0
 			if depthFrac > 1 {
 				depthFrac = 1
@@ -546,19 +792,16 @@ func (b *BackgroundModel) updateTunnel() {
 
 			var cr, cg, cb uint8
 			if ring > 0 {
-				// Light ring - theme colored
 				intensity := ring * depthBright * 0.45
 				cr, cg, cb = lerpColor(pr, pg, ppb, sr, sg, sb, depthFrac)
 				cr, cg, cb = dimColor(cr, cg, cb, intensity)
 			} else {
-				// Dark ring
 				intensity := (1.0 + ring*0.5) * depthBright * 0.12
 				cr = uint8(intensity * 40)
 				cg = uint8(intensity * 20)
 				cb = uint8(intensity * 60)
 			}
 
-			// Checkerboard overlay
 			checker := b.fastSin(u*16.0*math.Pi) * b.fastSin(v*4.0*math.Pi)
 			if checker > 0 {
 				cr = uint8(minInt(255, int(cr)+8))
@@ -571,7 +814,7 @@ func (b *BackgroundModel) updateTunnel() {
 	}
 }
 
-// --- Plasma (classic demoscene) ---
+// --- Plasma (classic demoscene — half-block, color-intensive) ---
 
 func (b *BackgroundModel) updatePlasma() {
 	b.ensurePixelBuffer()
@@ -592,17 +835,15 @@ func (b *BackgroundModel) updatePlasma() {
 		for x := 0; x < b.width; x++ {
 			fx := float64(x) / float64(b.width)
 
-			// Multiple overlapping sine waves at different frequencies
 			v1 := b.fastSin(fx*6.0*math.Pi + t)
 			v2 := b.fastSin(fy*8.0*math.Pi + t*1.3)
 			v3 := b.fastSin((fx+fy)*5.0*math.Pi + t*0.7)
 			v4 := b.fastSin(math.Sqrt((fx-0.5)*(fx-0.5)*16+(fy-0.5)*(fy-0.5)*16)*4.0*math.Pi + t*1.1)
 			v5 := b.fastSin(fx*3.0*math.Pi+b.fastSin(fy*4.0*math.Pi+t)*2.0+t*0.5)
 
-			val := (v1 + v2 + v3 + v4 + v5) / 5.0 // -1..1
-			val = (val + 1.0) / 2.0                  // 0..1
+			val := (v1 + v2 + v3 + v4 + v5) / 5.0
+			val = (val + 1.0) / 2.0
 
-			// Map to theme palette: primary → secondary → accent → primary
 			var cr, cg, cb uint8
 			maxBright := 0.40
 			if val < 0.33 {
@@ -622,7 +863,7 @@ func (b *BackgroundModel) updatePlasma() {
 	}
 }
 
-// --- Fire (Doom-style) ---
+// --- Fire (Doom-style — half-block, color-intensive) ---
 
 func (b *BackgroundModel) initFire() {
 	if b.width == 0 || b.height == 0 {
@@ -630,13 +871,11 @@ func (b *BackgroundModel) initFire() {
 	}
 	pH := b.height * 2
 	b.fireHeat = make([]float64, b.width*pH)
-	// Ignite bottom row
 	for x := 0; x < b.width; x++ {
 		b.fireHeat[(pH-1)*b.width+x] = 1.0
 	}
 }
 
-// fireColor maps a heat value (0..1) to RGB.
 func fireColor(heat float64) (uint8, uint8, uint8) {
 	if heat < 0 {
 		heat = 0
@@ -644,8 +883,6 @@ func fireColor(heat float64) (uint8, uint8, uint8) {
 	if heat > 1 {
 		heat = 1
 	}
-	// black → dark red → red → orange → yellow → white
-	// Dimmed overall to keep text readable
 	dim := 0.50
 	if heat < 0.15 {
 		t := heat / 0.15
@@ -675,17 +912,14 @@ func (b *BackgroundModel) updateFire() {
 	pH := b.height * 2
 	w := b.width
 
-	// Ensure heat buffer size matches
 	if len(b.fireHeat) != w*pH {
 		b.initFire()
 	}
 
-	// Set bottom row to hot with random variation
 	for x := 0; x < w; x++ {
 		b.fireHeat[(pH-1)*w+x] = 0.7 + b.rng.Float64()*0.3
 	}
 
-	// Random hotspots at bottom
 	for k := 0; k < w/8; k++ {
 		x := b.rng.Intn(w)
 		b.fireHeat[(pH-1)*w+x] = 1.0
@@ -697,7 +931,6 @@ func (b *BackgroundModel) updateFire() {
 		}
 	}
 
-	// Propagate fire upward: each pixel = avg(below-left, below, below-right, 2-below) - random cooling
 	for py := 0; py < pH-1; py++ {
 		for x := 0; x < w; x++ {
 			below := py + 1
@@ -720,7 +953,6 @@ func (b *BackgroundModel) updateFire() {
 				b.fireHeat[below*w+right] +
 				b.fireHeat[below2*w+x]) / 4.0
 
-			// Cooling factor increases toward the top
 			coolRate := 0.012 + 0.006*b.rng.Float64()
 			avg -= coolRate
 			if avg < 0 {
@@ -730,7 +962,6 @@ func (b *BackgroundModel) updateFire() {
 		}
 	}
 
-	// Render to pixel buffer
 	b.pb.clear()
 	for py := 0; py < pH; py++ {
 		for x := 0; x < w; x++ {
@@ -743,7 +974,7 @@ func (b *BackgroundModel) updateFire() {
 	}
 }
 
-// --- Matrix (enhanced, character-based with half-block awareness) ---
+// --- Matrix (character-based with braille glyphs) ---
 
 var matrixChars = []rune("ｦｧｨｩｪｫｬｭｮｯｱｲｳｴｵｶｷｸｹｺABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
 
@@ -796,7 +1027,6 @@ func (b *BackgroundModel) updateMatrix() {
 			continue
 		}
 
-		// Random spotlight (briefly go bright white)
 		if !col.spotlight && b.rng.Float64() < 0.003 {
 			col.spotlight = true
 			col.spotTimer = 5 + b.rng.Intn(8)
@@ -808,7 +1038,6 @@ func (b *BackgroundModel) updateMatrix() {
 			}
 		}
 
-		// Glitch characters
 		if b.rng.Float64() < 0.08 && len(col.chars) > 0 {
 			idx := b.rng.Intn(len(col.chars))
 			col.chars[idx] = matrixChars[b.rng.Intn(len(matrixChars))]
@@ -826,10 +1055,8 @@ func (b *BackgroundModel) updateMatrix() {
 
 			var r, g, bv uint8
 			if dist == 0 {
-				// Head: bright white
 				r, g, bv = 200, 255, 200
 			} else if dist <= 2 {
-				// Near head: bright green
 				scale := brightness * 0.6
 				if col.spotlight {
 					r = uint8(180 * scale)
@@ -841,7 +1068,6 @@ func (b *BackgroundModel) updateMatrix() {
 					bv = uint8(30 * scale)
 				}
 			} else {
-				// Tail: fading green
 				scale := brightness * 0.40
 				if col.spotlight {
 					r = uint8(100 * scale)
@@ -860,6 +1086,17 @@ func (b *BackgroundModel) updateMatrix() {
 			}
 			ch := col.chars[charIdx]
 
+			// Use braille characters for detail in the tail
+			if dist > 3 && brightness < 0.5 {
+				// Map the character to a braille glyph for organic look
+				brailleBase := rune(0x2800)
+				pattern := rune(ch) % 255
+				if pattern == 0 {
+					pattern = 1
+				}
+				ch = brailleBase + pattern
+			}
+
 			if b.charGrid[y] == nil {
 				b.charGrid[y] = make(map[int]bgCell)
 			}
@@ -868,7 +1105,7 @@ func (b *BackgroundModel) updateMatrix() {
 	}
 }
 
-// --- Ocean (3D water surface) ---
+// --- Ocean (3D water surface — half-block, color-intensive) ---
 
 func (b *BackgroundModel) updateOcean() {
 	b.ensurePixelBuffer()
@@ -882,55 +1119,47 @@ func (b *BackgroundModel) updateOcean() {
 
 	for py := 0; py < b.height*2; py++ {
 		fy := float64(py) / float64(b.height*2)
-		// Perspective: bottom rows are "closer" — waves are larger
 		perspective := 0.3 + fy*0.7
 		waveScale := 1.0 + fy*2.0
 
 		for x := 0; x < b.width; x++ {
 			fx := float64(x) / float64(b.width)
 
-			// Overlapping sine waves for wave height
 			h1 := b.fastSin(fx*4.0*math.Pi*waveScale + t*1.2)
 			h2 := b.fastSin(fx*7.0*math.Pi*waveScale + fy*3.0*math.Pi + t*0.8)
 			h3 := b.fastSin((fx+fy)*5.0*math.Pi + t*0.6)
 			h4 := b.fastSin(fx*11.0*math.Pi*waveScale*0.5 + t*1.8)
 
-			waveH := (h1*0.4 + h2*0.3 + h3*0.2 + h4*0.1) // -1..1
-			waveH = (waveH + 1.0) / 2.0                     // 0..1
+			waveH := (h1*0.4 + h2*0.3 + h3*0.2 + h4*0.1)
+			waveH = (waveH + 1.0) / 2.0
 
-			// Color based on wave height
 			var cr, cg, cb uint8
 			maxBright := 0.45 * perspective
 
 			if waveH < 0.3 {
-				// Deep trough: dark blue
 				intensity := maxBright * 0.4
 				cr = uint8(5 * intensity * 255 / 100)
 				cg = uint8(15 * intensity * 255 / 100)
 				cb = uint8(50 * intensity * 255 / 100)
 			} else if waveH < 0.6 {
-				// Mid: medium blue
 				frac := (waveH - 0.3) / 0.3
 				intensity := maxBright * (0.5 + frac*0.3)
 				cr = uint8(10 * intensity * 255 / 100)
 				cg = uint8((30 + 40*frac) * intensity * 255 / 100)
 				cb = uint8((60 + 30*frac) * intensity * 255 / 100)
 			} else if waveH < 0.85 {
-				// Crest: cyan
 				frac := (waveH - 0.6) / 0.25
 				intensity := maxBright * (0.7 + frac*0.3)
 				cr = uint8((20 + 40*frac) * intensity * 255 / 100)
 				cg = uint8((70 + 50*frac) * intensity * 255 / 100)
 				cb = uint8((90 + 10*frac) * intensity * 255 / 100)
 			} else {
-				// Foam/crest: bright white-cyan
 				intensity := maxBright
 				cr = uint8(80 * intensity * 255 / 100)
 				cg = uint8(95 * intensity * 255 / 100)
 				cb = uint8(100 * intensity * 255 / 100)
 			}
 
-			// Sparkle on crests
 			if waveH > 0.88 && b.rng.Float64() < 0.15 {
 				sparkle := uint8(maxBright * 255)
 				cr = sparkle
@@ -943,15 +1172,13 @@ func (b *BackgroundModel) updateOcean() {
 	}
 }
 
-// --- Cube (rotating 3D wireframe) ---
+// --- Cube (rotating 3D wireframe — braille rendering) ---
 
-// Unit cube vertices
 var cubeVertices = [8][3]float64{
 	{-1, -1, -1}, {1, -1, -1}, {1, 1, -1}, {-1, 1, -1},
 	{-1, -1, 1}, {1, -1, 1}, {1, 1, 1}, {-1, 1, 1},
 }
 
-// Cube edges (pairs of vertex indices)
 var cubeEdges = [12][2]int{
 	{0, 1}, {1, 2}, {2, 3}, {3, 0}, // back face
 	{4, 5}, {5, 6}, {6, 7}, {7, 4}, // front face
@@ -966,8 +1193,8 @@ func (b *BackgroundModel) initCube() {
 }
 
 func (b *BackgroundModel) updateCube() {
-	b.ensurePixelBuffer()
-	b.pb.clear()
+	b.ensureBrailleBuffer()
+	b.bb.clear()
 
 	if b.width == 0 || b.height == 0 {
 		return
@@ -979,31 +1206,31 @@ func (b *BackgroundModel) updateCube() {
 	pr, pg, ppb := b.themeRGB("primary")
 	sr, sg, sb := b.themeRGB("secondary")
 
-	cx := float64(b.width) / 2.0
-	cy := float64(b.height) // pixel center y (double res)
+	// Braille pixel space center
+	pixW := float64(b.bb.pixW)
+	pixH := float64(b.bb.pixH)
+	cx := pixW / 2.0
+	cy := pixH / 2.0
 
-	// Scale cube to fill ~60% of screen
-	scale := math.Min(float64(b.width), float64(b.height)) * 0.55
+	// Scale to fill ~60% of braille pixel space
+	scale := math.Min(pixW, pixH) * 0.28
 
 	sinX := b.fastSin(b.cube.angleX)
 	cosX := b.fastCos(b.cube.angleX)
 	sinY := b.fastSin(b.cube.angleY)
 	cosY := b.fastCos(b.cube.angleY)
 
-	// Project vertices
+	// Project vertices into braille pixel space
 	var projected [8][2]float64
 	var zVals [8]float64
 	for i, v := range cubeVertices {
-		// Rotate around Y
 		rx := v[0]*cosY - v[2]*sinY
 		rz := v[0]*sinY + v[2]*cosY
 		ry := v[1]
 
-		// Rotate around X
 		ry2 := ry*cosX - rz*sinX
 		rz2 := ry*sinX + rz*cosX
 
-		// Perspective projection
 		dist := 4.0 + rz2
 		if dist < 0.5 {
 			dist = 0.5
@@ -1017,29 +1244,28 @@ func (b *BackgroundModel) updateCube() {
 
 	// Save to history for trail effect
 	b.cube.history = append(b.cube.history, projected)
-	if len(b.cube.history) > 5 {
-		b.cube.history = b.cube.history[len(b.cube.history)-5:]
+	if len(b.cube.history) > 6 {
+		b.cube.history = b.cube.history[len(b.cube.history)-6:]
 	}
 
-	// Draw trail frames (dimmer)
+	// Draw trail frames (dimmer older frames)
 	for hi, hist := range b.cube.history {
-		fade := float64(hi+1) / float64(len(b.cube.history)+1) * 0.15
+		fade := float64(hi+1) / float64(len(b.cube.history)+1) * 0.12
 		tr, tg, tb := dimColor(sr, sg, sb, fade)
 		for _, edge := range cubeEdges {
 			v0 := hist[edge[0]]
 			v1 := hist[edge[1]]
-			b.drawPixelLine(int(v0[0]), int(v0[1]), int(v1[0]), int(v1[1]), tr, tg, tb)
+			b.bb.drawLine(int(v0[0]), int(v0[1]), int(v1[0]), int(v1[1]), tr, tg, tb)
 		}
 	}
 
-	// Draw current frame edges
+	// Draw current frame edges — high resolution braille lines
 	for _, edge := range cubeEdges {
 		v0 := projected[edge[0]]
 		v1 := projected[edge[1]]
 
-		// Color based on average Z of the edge vertices (front = bright, back = dim)
 		avgZ := (zVals[edge[0]] + zVals[edge[1]]) / 2.0
-		depthFrac := (avgZ + 1.5) / 3.0 // normalize roughly to 0..1
+		depthFrac := (avgZ + 1.5) / 3.0
 		if depthFrac < 0 {
 			depthFrac = 0
 		}
@@ -1047,14 +1273,14 @@ func (b *BackgroundModel) updateCube() {
 			depthFrac = 1
 		}
 
-		brightness := 0.20 + depthFrac*0.35
+		brightness := 0.25 + depthFrac*0.40
 		cr, cg, cb := lerpColor(sr, sg, sb, pr, pg, ppb, depthFrac)
 		cr, cg, cb = dimColor(cr, cg, cb, brightness)
 
-		b.drawPixelLine(int(v0[0]), int(v0[1]), int(v1[0]), int(v1[1]), cr, cg, cb)
+		b.bb.drawLine(int(v0[0]), int(v0[1]), int(v1[0]), int(v1[1]), cr, cg, cb)
 	}
 
-	// Draw vertices as bright dots
+	// Draw vertices as small dot clusters (3x3 for braille sub-pixel precision)
 	for i, p := range projected {
 		depthFrac := (zVals[i] + 1.5) / 3.0
 		if depthFrac < 0 {
@@ -1063,18 +1289,20 @@ func (b *BackgroundModel) updateCube() {
 		if depthFrac > 1 {
 			depthFrac = 1
 		}
-		brightness := 0.35 + depthFrac*0.35
+		brightness := 0.40 + depthFrac*0.35
 		cr, cg, cb := dimColor(pr, pg, ppb, brightness)
 		ix, iy := int(p[0]), int(p[1])
-		// Draw 2x2 dot
-		b.pb.set(ix, iy, cr, cg, cb)
-		b.pb.set(ix+1, iy, cr, cg, cb)
-		b.pb.set(ix, iy+1, cr, cg, cb)
-		b.pb.set(ix+1, iy+1, cr, cg, cb)
+		// 3x3 dot cluster for visible vertices
+		for dy := -1; dy <= 1; dy++ {
+			for dx := -1; dx <= 1; dx++ {
+				b.bb.set(ix+dx, iy+dy, cr, cg, cb)
+			}
+		}
 	}
 }
 
 // drawPixelLine draws a line in the pixel buffer using Bresenham's algorithm.
+// Kept for any future half-block modes that need line drawing.
 func (b *BackgroundModel) drawPixelLine(x0, y0, x1, y1 int, r, g, bv uint8) {
 	dx := x1 - x0
 	dy := y1 - y0
@@ -1141,23 +1369,21 @@ func (b *BackgroundModel) updateAnimation() {
 
 // --- Rendering ---
 
-// isPixelMode returns true if the mode uses the pixel buffer (half-block rendering).
-func (b *BackgroundModel) isPixelMode() bool {
-	switch b.mode {
-	case BgStarfield, BgTunnel, BgPlasma, BgFire, BgOcean, BgCube:
-		return true
-	}
-	return false
-}
-
 // RenderLine renders a full background line at row y.
 func (b *BackgroundModel) RenderLine(y, width int) string {
 	if b.mode == BgOff || width == 0 {
 		return strings.Repeat(" ", width)
 	}
+	if b.isBrailleMode() && b.bb != nil {
+		rendered := b.bb.renderRow(y)
+		renderedLen := b.bb.termW
+		if renderedLen < width {
+			rendered += strings.Repeat(" ", width-renderedLen)
+		}
+		return rendered
+	}
 	if b.isPixelMode() && b.pb != nil {
 		rendered := b.pb.renderRow(y)
-		// Pad if needed
 		renderedLen := b.pb.width
 		if renderedLen < width {
 			rendered += strings.Repeat(" ", width-renderedLen)
@@ -1203,8 +1429,48 @@ func (b *BackgroundModel) RenderSegment(y, startX, endX int) string {
 		return ""
 	}
 
+	if b.isBrailleMode() && b.bb != nil {
+		// For braille modes, render segment as individual braille cells
+		var sb strings.Builder
+		sb.Grow((endX - startX) * 30)
+		basePixY := y * 4
+		for tx := startX; tx < endX; tx++ {
+			basePixX := tx * 2
+			var pattern rune
+			var totalR, totalG, totalB int
+			var dotCount int
+
+			for dx := 0; dx < 2; dx++ {
+				for dy := 0; dy < 4; dy++ {
+					px := basePixX + dx
+					py := basePixY + dy
+					if px < b.bb.pixW && py < b.bb.pixH {
+						lit, c := b.bb.get(px, py)
+						if lit {
+							pattern |= brailleDotBit[dx][dy]
+							totalR += int(c.r)
+							totalG += int(c.g)
+							totalB += int(c.b)
+							dotCount++
+						}
+					}
+				}
+			}
+
+			ch := rune(0x2800 + pattern)
+			if dotCount == 0 {
+				sb.WriteByte(' ')
+			} else {
+				cr := uint8(totalR / dotCount)
+				cg := uint8(totalG / dotCount)
+				cb := uint8(totalB / dotCount)
+				fmt.Fprintf(&sb, "\x1b[38;2;%d;%d;%dm%c\x1b[0m", cr, cg, cb, ch)
+			}
+		}
+		return sb.String()
+	}
+
 	if b.isPixelMode() && b.pb != nil {
-		// For pixel modes, render the segment using half-blocks
 		var sb strings.Builder
 		sb.Grow((endX - startX) * 40)
 		for x := startX; x < endX; x++ {
@@ -1317,7 +1583,27 @@ func (b *BackgroundModel) cellAt(row, col int) (ch rune, r, g, bv uint8) {
 	if row < 0 || row >= b.height || col < 0 || col >= b.width {
 		return ' ', 0, 0, 0
 	}
-	// For pixel modes, return a space with the pixel color as "foreground"
+	if b.isBrailleMode() && b.bb != nil {
+		// Return averaged color from braille cell
+		baseX := col * 2
+		baseY := row * 4
+		var totalR, totalG, totalB, count int
+		for dy := 0; dy < 4; dy++ {
+			for dx := 0; dx < 2; dx++ {
+				lit, c := b.bb.get(baseX+dx, baseY+dy)
+				if lit {
+					totalR += int(c.r)
+					totalG += int(c.g)
+					totalB += int(c.b)
+					count++
+				}
+			}
+		}
+		if count > 0 {
+			return '⠿', uint8(totalR / count), uint8(totalG / count), uint8(totalB / count)
+		}
+		return ' ', 0, 0, 0
+	}
 	if b.isPixelMode() && b.pb != nil {
 		top := b.pb.get(col, row*2)
 		bot := b.pb.get(col, row*2+1)
@@ -1336,6 +1622,9 @@ func (b *BackgroundModel) cellAt(row, col int) (ch rune, r, g, bv uint8) {
 
 // cellBgColor returns the background RGB for a specific cell position.
 func (b *BackgroundModel) cellBgColor(row, col int) (r, g, bVal int) {
+	if b.isBrailleMode() && b.bb != nil {
+		return b.bb.bgColorAt(row, col)
+	}
 	if b.isPixelMode() && b.pb != nil {
 		return b.pb.bgColorAt(row, col)
 	}
