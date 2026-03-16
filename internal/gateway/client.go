@@ -120,7 +120,7 @@ func (c *Client) Connect() error {
 				Password: c.password,
 			},
 			Role:   "operator",
-			Scopes: []string{"operator.admin"},
+			Scopes: []string{"operator.admin", "operator.read", "operator.write", "operator.approvals"},
 		},
 	}
 	if err := conn.WriteJSON(connectFrame); err != nil {
