@@ -6,8 +6,6 @@ import (
 	"math/rand"
 	"strings"
 	"time"
-
-	"github.com/charmbracelet/lipgloss"
 )
 
 // BgMode identifies a background animation mode.
@@ -1175,6 +1173,8 @@ func (b *BackgroundModel) RenderSegment(y, startX, endX int) string {
 }
 
 // ApplyToView composites the background behind the main view content.
+// Text with no explicit background gets the animated background color.
+// Text with an explicit background (header, status bar, code blocks) keeps its own bg.
 func (b *BackgroundModel) ApplyToView(view string, width, height int) string {
 	if b.mode == BgOff || width == 0 || height == 0 {
 		return view
@@ -1186,15 +1186,15 @@ func (b *BackgroundModel) ApplyToView(view string, width, height int) string {
 	for y := 0; y < height; y++ {
 		if y < len(lines) {
 			line := lines[y]
-			visWidth := lipgloss.Width(line)
 			stripped := stripAnsi(line)
 
 			if strings.TrimSpace(stripped) == "" {
+				// Fully empty line: render pure background
 				result = append(result, b.RenderLine(y, width))
-			} else if visWidth < width {
-				result = append(result, line+b.RenderSegment(y, visWidth, width))
 			} else {
-				result = append(result, line)
+				// Line has text content: inject bg colors behind transparent chars
+				composed := b.compositeLineWithBg(line, y, width)
+				result = append(result, composed)
 			}
 		} else {
 			result = append(result, b.RenderLine(y, width))
@@ -1202,6 +1202,85 @@ func (b *BackgroundModel) ApplyToView(view string, width, height int) string {
 	}
 
 	return strings.Join(result, "\n")
+}
+
+// compositeLineWithBg walks through a line's ANSI sequences and injects
+// background colors from the animation behind characters that don't already
+// have an explicit background set.
+func (b *BackgroundModel) compositeLineWithBg(line string, row, totalWidth int) string {
+	var result strings.Builder
+	col := 0
+	hasBg := false
+	i := 0
+	runes := []rune(line)
+
+	for i < len(runes) {
+		if runes[i] == '\x1b' && i+1 < len(runes) && runes[i+1] == '[' {
+			// Parse ANSI escape sequence
+			j := i + 2
+			for j < len(runes) && !((runes[j] >= 'a' && runes[j] <= 'z') || (runes[j] >= 'A' && runes[j] <= 'Z')) {
+				j++
+			}
+			if j < len(runes) {
+				j++ // include the terminating letter
+			}
+			seq := string(runes[i:j])
+			// Check if this sequence sets a background color (48; or 4x where x is 0-7)
+			if strings.Contains(seq, "48;") || strings.Contains(seq, "\x1b[4") {
+				hasBg = true
+			}
+			// Reset clears background
+			if seq == "\x1b[m" || seq == "\x1b[0m" {
+				hasBg = false
+			}
+			result.WriteString(seq)
+			i = j
+			continue
+		}
+
+		// Visible character
+		if !hasBg && col < totalWidth {
+			// Inject animated background color for this cell
+			bgR, bgG, bgB := b.cellBgColor(row, col)
+			fmt.Fprintf(&result, "\x1b[48;2;%d;%d;%dm", bgR, bgG, bgB)
+		}
+		result.WriteRune(runes[i])
+		col++
+		i++
+	}
+
+	// Pad remaining width with background
+	if col < totalWidth {
+		result.WriteString(b.RenderSegment(row, col, totalWidth))
+	}
+
+	// Reset at end
+	result.WriteString("\x1b[m")
+	return result.String()
+}
+
+// cellAt returns the animation character and color at a grid position.
+func (b *BackgroundModel) cellAt(row, col int) (ch rune, r, g, bv uint8) {
+	if row < 0 || row >= b.height || col < 0 || col >= b.width {
+		return ' ', 0, 0, 0
+	}
+	if b.charGrid[row] != nil {
+		if cell, ok := b.charGrid[row][col]; ok {
+			return cell.ch, cell.fg[0], cell.fg[1], cell.fg[2]
+		}
+	}
+	return ' ', 0, 0, 0
+}
+
+// cellBgColor returns the background RGB for a specific cell position.
+func (b *BackgroundModel) cellBgColor(row, col int) (r, g, bVal int) {
+	_, cr, cg, cb := b.cellAt(row, col)
+	if cr == 0 && cg == 0 && cb == 0 {
+		// No animation at this cell — very dark base
+		return 6, 6, 10
+	}
+	// Dim the color for background use (25% brightness)
+	return int(cr) * 25 / 100, int(cg) * 25 / 100, int(cb) * 25 / 100
 }
 
 // --- Color helpers ---
