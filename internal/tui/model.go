@@ -567,6 +567,11 @@ func (m Model) handleGatewayEvent(evt gateway.GatewayEvent) (tea.Model, tea.Cmd)
 			m.handleChatEvent(evt.Chat)
 		}
 
+	case "agent":
+		if evt.Agent != nil {
+			m.handleAgentEvent(evt.Agent)
+		}
+
 	case "btw":
 		if evt.BTW != nil {
 			m.chat.AddMessage(ChatMsg{
@@ -599,6 +604,46 @@ func (m Model) handleGatewayEvent(evt gateway.GatewayEvent) (tea.Model, tea.Cmd)
 	}
 
 	return m, m.listenGateway()
+}
+
+func (m *Model) handleAgentEvent(agent *gateway.AgentEvent) {
+	switch agent.Stream {
+	case "assistant":
+		var data gateway.AgentAssistantData
+		if err := json.Unmarshal(agent.Data, &data); err != nil {
+			return
+		}
+		if !m.streaming {
+			m.streaming = true
+			m.activeRunID = agent.RunID
+			m.streamBuf = ""
+			m.activityBar.Start()
+			m.chat.AddMessage(ChatMsg{
+				Role:      RoleAssistant,
+				Content:   "",
+				Timestamp: time.Now(),
+				Streaming: true,
+				RunID:     agent.RunID,
+			})
+			m.layout()
+		}
+		m.streamBuf = data.Text
+		m.chat.UpdateLastAssistant(m.streamBuf, true)
+
+	case "lifecycle":
+		var data gateway.AgentLifecycleData
+		if err := json.Unmarshal(agent.Data, &data); err != nil {
+			return
+		}
+		if data.Phase == "end" && m.streaming {
+			m.streaming = false
+			m.activityBar.Stop()
+			m.chat.UpdateLastAssistant(m.streamBuf, false)
+			m.streamBuf = ""
+			m.activeRunID = ""
+			m.layout()
+		}
+	}
 }
 
 func (m *Model) handleChatEvent(chat *gateway.ChatEvent) {
@@ -690,9 +735,10 @@ func (m Model) tickCmd() tea.Cmd {
 func (m Model) sendMessage(text string) tea.Cmd {
 	return func() tea.Msg {
 		params := gateway.ChatSendParams{
-			SessionKey: m.sessionKey,
-			Message:    text,
-			Thinking:   m.thinking,
+			SessionKey:     m.sessionKey,
+			Message:        text,
+			Thinking:       m.thinking,
+			IdempotencyKey: fmt.Sprintf("%d", time.Now().UnixNano()),
 		}
 		// Use fire-and-forget — the actual response comes as chat events
 		err := m.gateway.RequestAsync(gateway.MethodChatSend, params)

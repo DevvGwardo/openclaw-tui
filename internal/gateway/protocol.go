@@ -123,9 +123,10 @@ type DeviceInfo struct {
 
 // ChatSendParams is sent when the user sends a message.
 type ChatSendParams struct {
-	SessionKey string `json:"sessionKey"`
-	Message    string `json:"message"`
-	Thinking   string `json:"thinking,omitempty"`
+	SessionKey     string `json:"sessionKey"`
+	Message        string `json:"message"`
+	Thinking       string `json:"thinking,omitempty"`
+	IdempotencyKey string `json:"idempotencyKey"`
 }
 
 // ChatAbortParams aborts an active run.
@@ -165,6 +166,26 @@ type SessionInfo struct {
 type StatusPayload struct {
 	Sessions []SessionInfo `json:"sessions,omitempty"`
 	Version  string        `json:"version,omitempty"`
+}
+
+// AgentEvent is the payload of an agent stream event.
+type AgentEvent struct {
+	RunID      string          `json:"runId"`
+	Stream     string          `json:"stream"`
+	Data       json.RawMessage `json:"data"`
+	SessionKey string          `json:"sessionKey"`
+	Seq        int             `json:"seq"`
+}
+
+// AgentAssistantData is the data for stream="assistant".
+type AgentAssistantData struct {
+	Text  string `json:"text"`
+	Delta string `json:"delta"`
+}
+
+// AgentLifecycleData is the data for stream="lifecycle".
+type AgentLifecycleData struct {
+	Phase string `json:"phase"` // "start" or "end"
 }
 
 // BTWPayload is a "by the way" informational message.

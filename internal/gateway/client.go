@@ -21,8 +21,9 @@ const (
 
 // GatewayEvent is sent to the TUI via a channel.
 type GatewayEvent struct {
-	Type    string // "connected", "disconnected", "chat", "tick", "session.update", "btw", "error"
+	Type    string // "connected", "disconnected", "chat", "agent", "tick", "session.update", "btw", "error"
 	Chat    *ChatEvent
+	Agent   *AgentEvent
 	BTW     *BTWPayload
 	Error   error
 	Payload json.RawMessage
@@ -323,6 +324,12 @@ func (c *Client) handleEvent(frame Frame) {
 		var chat ChatEvent
 		if err := json.Unmarshal(frame.Payload, &chat); err == nil {
 			c.emit(GatewayEvent{Type: "chat", Chat: &chat})
+		}
+
+	case EventAgent:
+		var agent AgentEvent
+		if err := json.Unmarshal(frame.Payload, &agent); err == nil {
+			c.emit(GatewayEvent{Type: "agent", Agent: &agent})
 		}
 
 	case EventSessionUpdate:
