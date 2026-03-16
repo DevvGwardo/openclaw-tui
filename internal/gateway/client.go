@@ -85,13 +85,17 @@ func (c *Client) Connect() error {
 	c.conn = conn
 	c.connMu.Unlock()
 
-	// Read the challenge
-	var frame Frame
-	if err := conn.ReadJSON(&frame); err != nil {
+	// Read the challenge - read raw first to handle any frame shape
+	_, rawMsg, err := conn.ReadMessage()
+	if err != nil {
 		return fmt.Errorf("read challenge: %w", err)
 	}
-	if frame.Type != FrameTypeEvent || frame.Event != EventConnectChallenge {
-		return fmt.Errorf("expected connect.challenge, got %s/%s", frame.Type, frame.Event)
+	var frame Frame
+	if err := json.Unmarshal(rawMsg, &frame); err != nil {
+		return fmt.Errorf("parse challenge frame: %w", err)
+	}
+	if !isEventFrame(frame.Type) || frame.Event != EventConnectChallenge {
+		return fmt.Errorf("expected connect.challenge, got type=%q event=%q", frame.Type, frame.Event)
 	}
 
 	// Send connect request
@@ -248,10 +252,10 @@ func (c *Client) readLoop() {
 			return
 		}
 
-		switch frame.Type {
-		case FrameTypeEvent:
+		switch {
+		case isEventFrame(frame.Type):
 			c.handleEvent(frame)
-		case FrameTypeResponse:
+		case isResponseFrame(frame.Type):
 			c.handleResponse(frame)
 		}
 	}
@@ -338,6 +342,14 @@ func (c *Client) watchdogLoop() {
 			return
 		}
 	}
+}
+
+func isEventFrame(t string) bool {
+	return t == FrameTypeEvent || t == FrameTypeEventAlt
+}
+
+func isResponseFrame(t string) bool {
+	return t == FrameTypeResponse || t == FrameTypeResponseAlt
 }
 
 func (c *Client) scheduleReconnect() {

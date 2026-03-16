@@ -2,11 +2,13 @@ package gateway
 
 import "encoding/json"
 
-// Frame types
+// Frame types — gateway sends long-form, clients send short-form
 const (
-	FrameTypeEvent    = "evt"
+	FrameTypeEvent    = "event"
+	FrameTypeEventAlt = "evt"
 	FrameTypeRequest  = "req"
-	FrameTypeResponse = "res"
+	FrameTypeResponse = "response"
+	FrameTypeResponseAlt = "res"
 )
 
 // Event names
