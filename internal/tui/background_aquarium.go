@@ -305,11 +305,11 @@ func (b *BackgroundModel) updateAquarium() {
 		crab.x += crab.speed * crab.dir
 		crab.legPhase += 0.15
 
-		// Bounce off edges
-		if crab.x > float64(w-5) {
+		// Bounce off edges (crab is ~8px from center to claw tip)
+		if crab.x > float64(w-9) {
 			crab.dir = -1
 		}
-		if crab.x < 5 {
+		if crab.x < 9 {
 			crab.dir = 1
 		}
 
@@ -646,22 +646,23 @@ func (b *BackgroundModel) drawDetailedFish(fish *aquariumFish, fx, fy float64, t
 	}
 }
 
-// --- Crab types and colors ---
+// --- Crab types and colors (Elthen-style pixel art palette) ---
 
 type crabColors struct {
-	shellR, shellG, shellB float64
-	legR, legG, legB       float64
-	clawR, clawG, clawB   float64
-	eyeR, eyeG, eyeB       float64
+	outR, outG, outB       float64 // dark outline
+	shellR, shellG, shellB float64 // main shell body
+	highR, highG, highB    float64 // shell highlights (golden)
+	bellyR, bellyG, bellyB float64 // lighter belly/underside
+	legR, legG, legB       float64 // legs/claws (dark)
 }
 
 var crabVariants = []crabColors{
-	// 0: Classic red crab
-	{200, 50, 30, 170, 40, 25, 220, 70, 40, 20, 20, 20},
-	// 1: Orange hermit crab
-	{220, 140, 40, 190, 110, 30, 240, 160, 50, 15, 15, 20},
-	// 2: Purple crab
-	{140, 50, 160, 110, 40, 130, 170, 70, 180, 20, 15, 25},
+	// 0: Classic orange-brown (Elthen original)
+	{40, 24, 8, 200, 120, 40, 224, 160, 48, 232, 176, 80, 48, 32, 16},
+	// 1: Reddish variant
+	{48, 16, 8, 190, 64, 32, 220, 100, 40, 224, 140, 72, 56, 24, 12},
+	// 2: Blue/teal variant
+	{12, 32, 48, 48, 140, 180, 80, 180, 210, 120, 200, 220, 16, 40, 56},
 }
 
 // SetTasks updates the task labels for aquarium crabs.
@@ -712,8 +713,8 @@ func (b *BackgroundModel) newCrab(task string) aquariumCrab {
 		dir = -1.0
 	}
 	pH := float64(b.height * 2)
-	// Crabs sit on the sandy bottom (last 4 pixel rows)
-	sandY := pH - 5.0
+	// Crabs sit on the sandy bottom; cy is shell bottom, legs extend 2px below
+	sandY := pH - 6.0
 
 	return aquariumCrab{
 		x:        b.rng.Float64() * float64(b.width),
@@ -726,14 +727,17 @@ func (b *BackgroundModel) newCrab(task string) aquariumCrab {
 	}
 }
 
-// drawCrab renders a single crab sprite on the pixel buffer.
+// drawCrab renders an Elthen-style pixel art crab on the pixel buffer.
+// Dome/arc shell with bumpy segments, small claws, stubby legs, eyes at shell-top.
 func (b *BackgroundModel) drawCrab(crab *aquariumCrab, t float64) {
 	pH := b.height * 2
 	w := b.width
 	cc := crabVariants[crab.variant%len(crabVariants)]
 
+	// Body bob animation (1px up/down)
+	bob := int(b.fastSin(crab.legPhase*0.5) * 0.6)
 	cx := int(crab.x)
-	cy := int(crab.y)
+	cy := int(crab.y) + bob
 	d := 1
 	if crab.dir < 0 {
 		d = -1
@@ -754,60 +758,128 @@ func (b *BackgroundModel) drawCrab(crab *aquariumCrab, t float64) {
 		}
 	}
 
-	legAnim := b.fastSin(crab.legPhase)
+	clawAnim := b.fastSin(crab.legPhase * 0.7)
 
-	// --- Shell (oval body, 5 wide × 3 tall) ---
-	// Center row
-	for dx := -2; dx <= 2; dx++ {
-		shade := 1.0 - float64(abs(dx))*0.08
-		setP(cx+dx, cy, cc.shellR*shade, cc.shellG*shade, cc.shellB*shade)
+	// Shorthand colors
+	oR, oG, oB := cc.outR, cc.outG, cc.outB       // outline
+	sR, sG, sB := cc.shellR, cc.shellG, cc.shellB  // shell body
+	hR, hG, hB := cc.highR, cc.highG, cc.highB     // highlight
+	bR, bG, bB := cc.bellyR, cc.bellyG, cc.bellyB  // belly
+	lR, lG, lB := cc.legR, cc.legG, cc.legB        // legs
+
+	// --- Dome shell (flat bottom, rounded top, ~13px wide × 7px tall) ---
+	// cy is the bottom of the shell; shell extends upward
+
+	// Row cy-6: bumpy top ridge — 3 scalloped segments with outline
+	setP(cx-3, cy-6, oR, oG, oB)
+	setP(cx-2, cy-6, hR, hG, hB)
+	setP(cx-1, cy-6, oR, oG, oB)
+	setP(cx, cy-6, hR, hG, hB)
+	setP(cx+1, cy-6, oR, oG, oB)
+	setP(cx+2, cy-6, hR, hG, hB)
+	setP(cx+3, cy-6, oR, oG, oB)
+
+	// Row cy-5: upper dome outline + fill
+	setP(cx-4, cy-5, oR, oG, oB)
+	for dx := -3; dx <= 3; dx++ {
+		setP(cx+dx, cy-5, sR, sG, sB)
 	}
-	// Top row (slightly narrower)
-	for dx := -1; dx <= 1; dx++ {
-		shade := 0.85
-		setP(cx+dx, cy-1, cc.shellR*shade, cc.shellG*shade, cc.shellB*shade)
+	setP(cx+4, cy-5, oR, oG, oB)
+	// Highlight on upper dome
+	setP(cx-1, cy-5, hR, hG, hB)
+	setP(cx, cy-5, hR, hG, hB)
+	setP(cx+1, cy-5, hR, hG, hB)
+
+	// Row cy-4: wider shell
+	setP(cx-5, cy-4, oR, oG, oB)
+	for dx := -4; dx <= 4; dx++ {
+		setP(cx+dx, cy-4, sR, sG, sB)
 	}
-	// Bottom row
-	for dx := -1; dx <= 1; dx++ {
-		shade := 0.75
-		setP(cx+dx, cy+1, cc.shellR*shade, cc.shellG*shade, cc.shellB*shade)
+	setP(cx+5, cy-4, oR, oG, oB)
+	// Highlight band
+	setP(cx-2, cy-4, hR, hG, hB)
+	setP(cx-1, cy-4, hR, hG, hB)
+	setP(cx, cy-4, hR, hG, hB)
+	setP(cx+1, cy-4, hR, hG, hB)
+
+	// Row cy-3: full width shell
+	setP(cx-6, cy-3, oR, oG, oB)
+	for dx := -5; dx <= 5; dx++ {
+		setP(cx+dx, cy-3, sR, sG, sB)
 	}
-	// Shell highlight
-	blendP(cx, cy-1, 255, 255, 255, 0.12)
-	blendP(cx-1, cy-1, 255, 255, 255, 0.06)
+	setP(cx+6, cy-3, oR, oG, oB)
+	// Subtle highlight
+	setP(cx-1, cy-3, hR, hG, hB)
+	setP(cx, cy-3, hR, hG, hB)
 
-	// --- Eyes (on stalks) ---
-	// Eye stalks
-	setP(cx+d, cy-2, cc.shellR*0.6, cc.shellG*0.6, cc.shellB*0.6)
-	setP(cx+d*2, cy-2, cc.shellR*0.6, cc.shellG*0.6, cc.shellB*0.6)
-	// Eyeballs
-	setP(cx+d, cy-3, cc.eyeR+200, cc.eyeG+200, cc.eyeB+200)
-	setP(cx+d*2, cy-3, cc.eyeR+200, cc.eyeG+200, cc.eyeB+200)
-	// Pupils
-	blendP(cx+d, cy-3, 10, 10, 15, 0.6)
-	blendP(cx+d*2, cy-3, 10, 10, 15, 0.6)
+	// Row cy-2: widest shell body
+	setP(cx-6, cy-2, oR, oG, oB)
+	for dx := -5; dx <= 5; dx++ {
+		setP(cx+dx, cy-2, sR, sG, sB)
+	}
+	setP(cx+6, cy-2, oR, oG, oB)
 
-	// --- Claws (front, animated) ---
-	clawOff := int(legAnim * 0.5)
-	// Right claw (front)
-	setP(cx+d*3, cy+clawOff, cc.clawR, cc.clawG, cc.clawB)
-	setP(cx+d*4, cy-1+clawOff, cc.clawR, cc.clawG, cc.clawB)
-	setP(cx+d*4, cy+1+clawOff, cc.clawR*0.8, cc.clawG*0.8, cc.clawB*0.8)
+	// Row cy-1: lower shell, belly tint
+	setP(cx-6, cy-1, oR, oG, oB)
+	for dx := -5; dx <= 5; dx++ {
+		mix := 0.4
+		r := sR*(1-mix) + bR*mix
+		g := sG*(1-mix) + bG*mix
+		bv := sB*(1-mix) + bB*mix
+		setP(cx+dx, cy-1, r, g, bv)
+	}
+	setP(cx+6, cy-1, oR, oG, oB)
 
-	// --- Legs (3 pairs, animated) ---
+	// Row cy: bottom of shell (flat base, outlined)
+	setP(cx-6, cy, oR, oG, oB)
+	for dx := -5; dx <= 5; dx++ {
+		setP(cx+dx, cy, bR, bG, bB)
+	}
+	setP(cx+6, cy, oR, oG, oB)
+	// Bottom outline
+	for dx := -5; dx <= 5; dx++ {
+		blendP(cx+dx, cy+1, oR, oG, oB, 0.5)
+	}
+
+	// --- Eyes (at front-top of shell, NOT on stalks) ---
+	// Place eyes on the shell surface near the front
+	eyeX1 := cx + d*2
+	eyeX2 := cx + d*4
+	eyeY := cy - 5
+	// White eyeball
+	setP(eyeX1, eyeY, 255, 255, 255)
+	setP(eyeX2, eyeY, 255, 255, 255)
+	// Dark pupil (toward the direction of movement)
+	setP(eyeX1+d, eyeY, 10, 10, 15)
+	setP(eyeX2+d, eyeY, 10, 10, 15)
+
+	// --- Claws (small, 2-3px protrusions on each side) ---
+	clawOff := int(clawAnim * 0.5)
+	// Front claw (direction crab faces)
+	setP(cx+d*7, cy-2+clawOff, lR, lG, lB)
+	setP(cx+d*7, cy-3+clawOff, lR, lG, lB)
+	setP(cx+d*8, cy-3+clawOff, lR, lG, lB) // pincer tip
+	// Rear claw (opposite side)
+	setP(cx-d*7, cy-2-clawOff, lR, lG, lB)
+	setP(cx-d*7, cy-3-clawOff, lR, lG, lB)
+	setP(cx-d*8, cy-3-clawOff, lR, lG, lB) // pincer tip
+
+	// --- Legs (2-3 stubby nubs per side, hanging below shell) ---
 	for leg := 0; leg < 3; leg++ {
-		phase := crab.legPhase + float64(leg)*1.2
-		legOff := int(b.fastSin(phase) * 0.8)
+		phase := crab.legPhase + float64(leg)*1.0
+		legOff := int(b.fastSin(phase) * 0.6)
 
-		// Top legs
-		lx := cx - d*(leg+1)
-		setP(lx, cy-1+legOff, cc.legR, cc.legG, cc.legB)
-		setP(lx, cy-2+legOff, cc.legR*0.7, cc.legG*0.7, cc.legB*0.7)
-		// Bottom legs
-		setP(lx, cy+2-legOff, cc.legR, cc.legG, cc.legB)
-		setP(lx, cy+3-legOff, cc.legR*0.7, cc.legG*0.7, cc.legB*0.7)
+		// Right-side legs
+		lx := cx + 2 + leg*2
+		setP(lx, cy+1+legOff, lR, lG, lB)
+		setP(lx, cy+2+legOff, lR*0.7, lG*0.7, lB*0.7)
+		// Left-side legs (mirrored)
+		lx = cx - 2 - leg*2
+		setP(lx, cy+1-legOff, lR, lG, lB)
+		setP(lx, cy+2-legOff, lR*0.7, lG*0.7, lB*0.7)
 	}
 }
+
 
 func abs(x int) int {
 	if x < 0 {
