@@ -31,6 +31,11 @@ type (
 		Content string
 		Err     error
 	}
+
+	// ModelInfoMsg carries the model name from a silent status fetch.
+	ModelInfoMsg struct {
+		Model string
+	}
 )
 
 // Model is the main Bubble Tea model.
@@ -136,13 +141,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			Timestamp: time.Now(),
 		})
 
+		var cmds []tea.Cmd
+		cmds = append(cmds, m.fetchModelInfo())
+
 		// Send initial message if provided
 		if m.initMessage != "" {
 			msg := m.initMessage
 			m.initMessage = ""
-			return m, m.sendMessage(msg)
+			cmds = append(cmds, m.sendMessage(msg))
 		}
-		return m, nil
+		return m, tea.Batch(cmds...)
 
 	case SendResultMsg:
 		if msg.Err != nil {
@@ -151,6 +159,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				Content:   fmt.Sprintf("Failed to send: %v", msg.Err),
 				Timestamp: time.Now(),
 			})
+		}
+		return m, nil
+
+	case ModelInfoMsg:
+		if msg.Model != "" {
+			m.statusBar.SetModel(msg.Model)
 		}
 		return m, nil
 
@@ -825,5 +839,24 @@ func (m Model) requestStatus() tea.Cmd {
 			}
 		}
 		return StatusResultMsg{Content: content}
+	}
+}
+
+func (m Model) fetchModelInfo() tea.Cmd {
+	return func() tea.Msg {
+		resp, err := m.gateway.Request(gateway.MethodStatus, nil)
+		if err != nil {
+			return ModelInfoMsg{}
+		}
+		var status gateway.StatusPayload
+		if resp.Payload != nil {
+			json.Unmarshal(resp.Payload, &status)
+		}
+		for _, s := range status.Sessions {
+			if s.Model != "" {
+				return ModelInfoMsg{Model: s.Model}
+			}
+		}
+		return ModelInfoMsg{}
 	}
 }

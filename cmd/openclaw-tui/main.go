@@ -96,7 +96,6 @@ func main() {
 	// Run Bubble Tea
 	p := tea.NewProgram(model,
 		tea.WithAltScreen(),
-		tea.WithMouseCellMotion(),
 	)
 
 	if _, err := p.Run(); err != nil {

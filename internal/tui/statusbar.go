@@ -23,7 +23,7 @@ func NewStatusBarModel(theme Theme) StatusBarModel {
 	return StatusBarModel{
 		theme:     theme,
 		session:   "agent:main:main",
-		model:     "unknown",
+		model:     "connecting...",
 		thinking:  "adaptive",
 		maxTokens: 200000,
 	}
