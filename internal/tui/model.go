@@ -3,6 +3,8 @@ package tui
 import (
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -165,6 +167,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case ModelInfoMsg:
 		if msg.Model != "" {
 			m.statusBar.SetModel(msg.Model)
+		} else {
+			// Fallback: read default model from OpenClaw config
+			if cfgModel := readDefaultModel(); cfgModel != "" {
+				m.statusBar.SetModel(cfgModel)
+			} else {
+				m.statusBar.SetModel("connected")
+			}
 		}
 		return m, nil
 
@@ -859,4 +868,30 @@ func (m Model) fetchModelInfo() tea.Cmd {
 		}
 		return ModelInfoMsg{}
 	}
+}
+
+// readDefaultModel reads the default model from ~/.openclaw/openclaw.json
+func readDefaultModel() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	cfgPath := filepath.Join(home, ".openclaw", "openclaw.json")
+	data, err := os.ReadFile(cfgPath)
+	if err != nil {
+		return ""
+	}
+	// Strip UTF-8 BOM if present
+	if len(data) >= 3 && data[0] == 0xEF && data[1] == 0xBB && data[2] == 0xBF {
+		data = data[3:]
+	}
+	var cfg struct {
+		Models struct {
+			Default string `json:"default"`
+		} `json:"models"`
+	}
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return ""
+	}
+	return cfg.Models.Default
 }
