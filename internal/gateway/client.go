@@ -33,6 +33,7 @@ type Client struct {
 	url      string
 	token    string
 	password string
+	device   *DeviceIdentity
 
 	conn     *websocket.Conn
 	connMu   sync.Mutex
@@ -52,11 +53,12 @@ type Client struct {
 }
 
 // NewClient creates a new gateway client.
-func NewClient(url, token, password string) *Client {
+func NewClient(url, token, password string, device *DeviceIdentity) *Client {
 	return &Client{
 		url:          url,
 		token:        token,
 		password:     password,
+		device:       device,
 		events:       make(chan GatewayEvent, 64),
 		pending:      make(map[string]chan *ResponseFrame),
 		done:         make(chan struct{}),
@@ -98,30 +100,50 @@ func (c *Client) Connect() error {
 		return fmt.Errorf("expected connect.challenge, got type=%q event=%q", frame.Type, frame.Event)
 	}
 
+	// Extract nonce from challenge
+	var challenge ConnectChallenge
+	if frame.Payload != nil {
+		if err := json.Unmarshal(frame.Payload, &challenge); err != nil {
+			return fmt.Errorf("parse challenge payload: %w", err)
+		}
+	}
+
+	// Build connect params
+	params := ConnectParams{
+		MinProtocol: protocolVersion,
+		MaxProtocol: protocolVersion,
+		Client: ClientInfo{
+			ID:          "gateway-client",
+			DisplayName: "openclaw-tui",
+			Version:     clientVersion,
+			Platform:    runtime.GOOS,
+			Mode:        "backend",
+		},
+		Caps: []string{},
+		Auth: AuthInfo{
+			Token:    c.token,
+			Password: c.password,
+		},
+		Role:   "operator",
+		Scopes: []string{"operator.admin"},
+	}
+
+	// Sign device identity if available
+	if c.device != nil && challenge.Nonce != "" {
+		deviceInfo, err := c.device.SignConnectPayload(challenge.Nonce, c.token)
+		if err != nil {
+			return fmt.Errorf("sign device payload: %w", err)
+		}
+		params.Device = &deviceInfo
+	}
+
 	// Send connect request directly (readLoop not started yet)
 	connectID := uuid.New().String()
 	connectFrame := RequestFrame{
 		Type:   FrameTypeRequest,
 		ID:     connectID,
 		Method: MethodConnect,
-		Params: ConnectParams{
-			MinProtocol: protocolVersion,
-			MaxProtocol: protocolVersion,
-			Client: ClientInfo{
-				ID:          "gateway-client",
-				DisplayName: "openclaw-tui",
-				Version:     clientVersion,
-				Platform:    runtime.GOOS,
-				Mode:        "backend",
-			},
-			Caps: []string{},
-			Auth: AuthInfo{
-				Token:    c.token,
-				Password: c.password,
-			},
-			Role:   "operator",
-			Scopes: []string{"operator.admin", "operator.read", "operator.write", "operator.approvals"},
-		},
+		Params: params,
 	}
 	if err := conn.WriteJSON(connectFrame); err != nil {
 		return fmt.Errorf("write connect: %w", err)

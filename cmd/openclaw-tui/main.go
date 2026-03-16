@@ -69,8 +69,17 @@ func main() {
 		}
 	}
 
+	// Load device identity for signed auth
+	var device *gateway.DeviceIdentity
+	identityPath := gateway.DefaultIdentityPath()
+	if identityPath != "" {
+		if d, err := gateway.LoadDeviceIdentity(identityPath); err == nil {
+			device = d
+		}
+	}
+
 	// Create gateway client
-	gw := gateway.NewClient(url, token, password)
+	gw := gateway.NewClient(url, token, password, device)
 
 	// Connect
 	if err := gw.Connect(); err != nil {
