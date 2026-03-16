@@ -1,0 +1,32 @@
+{
+  "name": "@openclaw/tui",
+  "version": "0.1.0",
+  "description": "Standalone terminal UI for OpenClaw gateway",
+  "type": "module",
+  "bin": {
+    "openclaw-tui": "./dist/index.mjs"
+  },
+  "main": "./dist/index.mjs",
+  "scripts": {
+    "build": "tsdown",
+    "dev": "tsdown --watch",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@mariozechner/pi-tui": "0.55.3",
+    "chalk": "^5.4.1",
+    "cli-highlight": "^2.1.11",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.3",
+    "@types/ws": "^8.18.1",
+    "tsdown": "^0.21.4",
+    "typescript": "^5.8.3"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT"
+}
