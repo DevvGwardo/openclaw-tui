@@ -3,6 +3,7 @@ package tui
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/DevvGwardo/openclaw-tui/internal/gateway"
@@ -34,13 +35,14 @@ type Model struct {
 	initMessage string
 
 	// UI components
-	header      HeaderModel
-	chat        ChatModel
-	input       InputModel
-	statusBar   StatusBarModel
-	activityBar ActivityBarModel
-	background  BackgroundModel
-	theme       Theme
+	header         HeaderModel
+	chat           ChatModel
+	input          InputModel
+	statusBar      StatusBarModel
+	activityBar    ActivityBarModel
+	background     BackgroundModel
+	commandPalette CommandPaletteModel
+	theme          Theme
 
 	// State
 	width       int
@@ -70,7 +72,8 @@ func NewModel(gw *gateway.Client, sessionKey, thinking, initMessage string, them
 		input:       NewInputModel(theme),
 		statusBar:   NewStatusBarModel(theme),
 		activityBar: NewActivityBarModel(theme),
-		background:  NewBackgroundModel(theme),
+		background:     NewBackgroundModel(theme),
+		commandPalette: NewCommandPaletteModel(theme),
 	}
 }
 
@@ -176,7 +179,33 @@ func (m Model) View() string {
 		view = m.background.ApplyToView(view, m.width, m.height)
 	}
 
+	// Overlay command palette
+	if m.commandPalette.IsActive() {
+		paletteView := m.commandPalette.View(m.width, m.height)
+		view = overlayPalette(view, paletteView, m.width, m.height)
+	}
+
 	return view
+}
+
+// overlayPalette composites the palette view on top of the main view,
+// positioning it near the top of the screen.
+func overlayPalette(base, overlay string, width, height int) string {
+	if overlay == "" {
+		return base
+	}
+	baseLines := strings.Split(base, "\n")
+	overlayLines := strings.Split(overlay, "\n")
+
+	// Position palette starting at row 2 (below header)
+	startRow := 2
+	for i, ol := range overlayLines {
+		row := startRow + i
+		if row < len(baseLines) {
+			baseLines[row] = ol
+		}
+	}
+	return strings.Join(baseLines, "\n")
 }
 
 func (m *Model) layout() {
@@ -198,6 +227,11 @@ func (m *Model) layout() {
 }
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// When command palette is active, route keys to it
+	if m.commandPalette.IsActive() {
+		return m.handlePaletteKey(msg)
+	}
+
 	switch msg.Type {
 	case tea.KeyCtrlC:
 		now := time.Now()
@@ -242,10 +276,83 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleSubmit()
 	}
 
-	// Pass to input
+	// Pass to input first, then check if we should open palette
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(msg)
+
+	// Sync palette with input: open when input starts with '/', close otherwise
+	val := m.input.Value()
+	if strings.HasPrefix(val, "/") {
+		filter := val[1:]
+		if !m.commandPalette.IsActive() {
+			m.commandPalette.Open(filter)
+		} else {
+			m.commandPalette.SetFilter(filter)
+		}
+	} else if m.commandPalette.IsActive() {
+		m.commandPalette.Close()
+	}
+
 	return m, cmd
+}
+
+func (m Model) handlePaletteKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.Type {
+	case tea.KeyEscape:
+		m.commandPalette.Close()
+		return m, nil
+
+	case tea.KeyUp:
+		m.commandPalette.MoveUp()
+		return m, nil
+
+	case tea.KeyDown:
+		m.commandPalette.MoveDown()
+		return m, nil
+
+	case tea.KeyEnter:
+		result := m.commandPalette.Selected()
+		if result == "" {
+			// Sub-option picker just opened, stay in palette
+			return m, nil
+		}
+		m.commandPalette.Close()
+		m.input.Reset()
+		// Execute the command
+		if cmd := ParseCommand(result); cmd != nil {
+			return m.handleCommand(cmd)
+		}
+		return m, nil
+
+	case tea.KeyCtrlC:
+		m.commandPalette.Close()
+		m.input.Reset()
+		return m, nil
+
+	case tea.KeyBackspace:
+		// Let input handle backspace, then sync filter
+		var cmd tea.Cmd
+		m.input, cmd = m.input.Update(msg)
+		val := m.input.Value()
+		if !strings.HasPrefix(val, "/") {
+			m.commandPalette.Close()
+		} else {
+			m.commandPalette.SetFilter(val[1:])
+		}
+		return m, cmd
+
+	default:
+		// Let input handle the keystroke, then sync filter
+		var cmd tea.Cmd
+		m.input, cmd = m.input.Update(msg)
+		val := m.input.Value()
+		if strings.HasPrefix(val, "/") {
+			m.commandPalette.SetFilter(val[1:])
+		} else {
+			m.commandPalette.Close()
+		}
+		return m, cmd
+	}
 }
 
 func (m Model) handleSubmit() (tea.Model, tea.Cmd) {
@@ -382,6 +489,16 @@ func (m Model) handleCommand(cmd *Command) (tea.Model, tea.Cmd) {
 				Timestamp: time.Now(),
 			})
 		}
+
+	case "abort":
+		if m.streaming {
+			return m, m.abortRun()
+		}
+		m.chat.AddMessage(ChatMsg{
+			Role:      RoleSystem,
+			Content:   "No active run to abort.",
+			Timestamp: time.Now(),
+		})
 
 	case "new", "reset":
 		m.chat.Clear()
@@ -530,6 +647,7 @@ func (m *Model) setTheme(name ThemeName) {
 	m.statusBar.SetTheme(m.theme)
 	m.activityBar.SetTheme(m.theme)
 	m.background.SetTheme(m.theme)
+	m.commandPalette.SetTheme(m.theme)
 }
 
 // Tea commands
