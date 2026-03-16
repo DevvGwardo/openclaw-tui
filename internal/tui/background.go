@@ -20,10 +20,19 @@ const (
 	BgMatrix    BgMode = "matrix"
 	BgOcean     BgMode = "ocean"
 	BgCube      BgMode = "cube"
+	BgSkibidi   BgMode = "skibidi"
+	BgSigma     BgMode = "sigma"
+	BgNpc       BgMode = "npc"
+	BgOhio      BgMode = "ohio"
+	BgRizz      BgMode = "rizz"
+	BgGyatt     BgMode = "gyatt"
+	BgAmogus    BgMode = "amogus"
+	BgBussin    BgMode = "bussin"
 )
 
 // BgModes lists all available background modes in cycle order.
-var BgModes = []BgMode{BgOff, BgStarfield, BgTunnel, BgPlasma, BgFire, BgMatrix, BgOcean, BgCube}
+var BgModes = []BgMode{BgOff, BgStarfield, BgTunnel, BgPlasma, BgFire, BgMatrix, BgOcean, BgCube,
+	BgSkibidi, BgSigma, BgNpc, BgOhio, BgRizz, BgGyatt, BgAmogus, BgBussin}
 
 // --- Pixel buffer for half-block rendering (color-intensive modes) ---
 
@@ -413,6 +422,18 @@ type BackgroundModel struct {
 	sinTable [1024]float64
 
 	rng *rand.Rand
+
+	// Brainrot mode state
+	skibidiObjs  []skibidiObj
+	sigmaTexts   []sigmaText
+	npcs         []npcChar
+	ohioGlitches []ohioGlitch
+	ohioFlash    int
+	rizzSparkles []rizzSparkle
+	gyattTexts   []gyattText
+	amogusCrews  []amogusCrew
+	amogusSus    int
+	bussinDrops  []bussinDrop
 }
 
 // NewBackgroundModel creates a new background renderer.
@@ -509,7 +530,7 @@ func (b *BackgroundModel) ensureBrailleBuffer() {
 // isBrailleMode returns true if the mode uses braille rendering.
 func (b *BackgroundModel) isBrailleMode() bool {
 	switch b.mode {
-	case BgStarfield, BgCube:
+	case BgStarfield, BgCube, BgAmogus:
 		return true
 	}
 	return false
@@ -518,7 +539,7 @@ func (b *BackgroundModel) isBrailleMode() bool {
 // isPixelMode returns true if the mode uses the pixel buffer (half-block rendering).
 func (b *BackgroundModel) isPixelMode() bool {
 	switch b.mode {
-	case BgTunnel, BgPlasma, BgFire, BgOcean:
+	case BgTunnel, BgPlasma, BgFire, BgOcean, BgSigma, BgOhio, BgRizz, BgBussin:
 		return true
 	}
 	return false
@@ -526,7 +547,11 @@ func (b *BackgroundModel) isPixelMode() bool {
 
 // isCharMode returns true if the mode uses character grid rendering.
 func (b *BackgroundModel) isCharMode() bool {
-	return b.mode == BgMatrix
+	switch b.mode {
+	case BgMatrix, BgSkibidi, BgNpc, BgGyatt:
+		return true
+	}
+	return false
 }
 
 func (b *BackgroundModel) initMode() {
@@ -545,6 +570,22 @@ func (b *BackgroundModel) initMode() {
 		b.initMatrix()
 	case BgCube:
 		b.initCube()
+	case BgSkibidi:
+		b.initSkibidi()
+	case BgSigma:
+		b.initSigma()
+	case BgNpc:
+		b.initNpc()
+	case BgOhio:
+		b.initOhio()
+	case BgRizz:
+		b.initRizz()
+	case BgGyatt:
+		b.initGyatt()
+	case BgAmogus:
+		b.initAmogus()
+	case BgBussin:
+		b.initBussin()
 	}
 }
 
@@ -1301,51 +1342,6 @@ func (b *BackgroundModel) updateCube() {
 	}
 }
 
-// drawPixelLine draws a line in the pixel buffer using Bresenham's algorithm.
-// Kept for any future half-block modes that need line drawing.
-func (b *BackgroundModel) drawPixelLine(x0, y0, x1, y1 int, r, g, bv uint8) {
-	dx := x1 - x0
-	dy := y1 - y0
-	if dx < 0 {
-		dx = -dx
-	}
-	if dy < 0 {
-		dy = -dy
-	}
-	sx := 1
-	if x0 > x1 {
-		sx = -1
-	}
-	sy := 1
-	if y0 > y1 {
-		sy = -1
-	}
-
-	err := dx - dy
-	steps := 0
-	maxSteps := dx + dy + 1
-	if maxSteps > 1000 {
-		maxSteps = 1000
-	}
-
-	for steps < maxSteps {
-		b.pb.set(x0, y0, r, g, bv)
-		if x0 == x1 && y0 == y1 {
-			break
-		}
-		e2 := 2 * err
-		if e2 > -dy {
-			err -= dy
-			x0 += sx
-		}
-		if e2 < dx {
-			err += dx
-			y0 += sy
-		}
-		steps++
-	}
-}
-
 // --- Animation dispatch ---
 
 func (b *BackgroundModel) updateAnimation() {
@@ -1364,6 +1360,22 @@ func (b *BackgroundModel) updateAnimation() {
 		b.updateOcean()
 	case BgCube:
 		b.updateCube()
+	case BgSkibidi:
+		b.updateSkibidi()
+	case BgSigma:
+		b.updateSigma()
+	case BgNpc:
+		b.updateNpc()
+	case BgOhio:
+		b.updateOhio()
+	case BgRizz:
+		b.updateRizz()
+	case BgGyatt:
+		b.updateGyatt()
+	case BgAmogus:
+		b.updateAmogus()
+	case BgBussin:
+		b.updateBussin()
 	}
 }
 

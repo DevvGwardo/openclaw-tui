@@ -25,6 +25,12 @@ type (
 	SendResultMsg struct {
 		Err error
 	}
+
+	// StatusResultMsg is the result of a /status request.
+	StatusResultMsg struct {
+		Content string
+		Err     error
+	}
 )
 
 // Model is the main Bubble Tea model.
@@ -137,6 +143,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.chat.AddMessage(ChatMsg{
 				Role:      RoleError,
 				Content:   fmt.Sprintf("Failed to send: %v", msg.Err),
+				Timestamp: time.Now(),
+			})
+		}
+		return m, nil
+
+	case StatusResultMsg:
+		if msg.Err != nil {
+			m.chat.AddMessage(ChatMsg{
+				Role:      RoleError,
+				Content:   fmt.Sprintf("Status error: %v", msg.Err),
+				Timestamp: time.Now(),
+			})
+		} else {
+			m.chat.AddMessage(ChatMsg{
+				Role:      RoleSystem,
+				Content:   msg.Content,
 				Timestamp: time.Now(),
 			})
 		}
@@ -424,8 +446,8 @@ func (m Model) handleCommand(cmd *Command) (tea.Model, tea.Cmd) {
 		} else {
 			mode := BgMode(cmd.Args)
 			valid := false
-			for _, m := range BgModes {
-				if m == mode {
+			for _, bm := range BgModes {
+				if bm == mode {
 					valid = true
 					break
 				}
@@ -433,7 +455,7 @@ func (m Model) handleCommand(cmd *Command) (tea.Model, tea.Cmd) {
 			if !valid {
 				m.chat.AddMessage(ChatMsg{
 					Role:      RoleError,
-					Content:   fmt.Sprintf("Unknown background mode: %s\nAvailable: off, starfield, tunnel, plasma, fire, matrix, ocean, cube", cmd.Args),
+					Content:   fmt.Sprintf("Unknown background mode: %s\nAvailable: off, starfield, tunnel, plasma, fire, matrix, ocean, cube, skibidi, sigma, npc, ohio, rizz, gyatt, amogus, bussin", cmd.Args),
 					Timestamp: time.Now(),
 				})
 				return m, nil
@@ -695,7 +717,7 @@ func (m Model) requestStatus() tea.Cmd {
 	return func() tea.Msg {
 		resp, err := m.gateway.Request(gateway.MethodStatus, nil)
 		if err != nil {
-			return SendResultMsg{Err: fmt.Errorf("status: %w", err)}
+			return StatusResultMsg{Err: fmt.Errorf("status: %w", err)}
 		}
 
 		var status gateway.StatusPayload
@@ -704,9 +726,12 @@ func (m Model) requestStatus() tea.Cmd {
 		}
 
 		content := fmt.Sprintf("Gateway version: %s\nSessions: %d", status.Version, len(status.Sessions))
-		// We can't directly add a message from a Cmd, so we'll use SendResult for errors
-		// For now, return nil and handle status display differently
-		_ = content
-		return nil
+		for _, s := range status.Sessions {
+			content += fmt.Sprintf("\n  • %s", s.Key)
+			if s.Model != "" {
+				content += fmt.Sprintf(" (model: %s)", s.Model)
+			}
+		}
+		return StatusResultMsg{Content: content}
 	}
 }

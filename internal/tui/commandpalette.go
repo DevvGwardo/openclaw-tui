@@ -21,7 +21,7 @@ type PaletteCommand struct {
 var PaletteCommands = []PaletteCommand{
 	{Name: "help", Desc: "Show help", Shortcut: ""},
 	{Name: "theme", Desc: "Switch theme", HasArgs: true, SubOptions: []string{"ocean", "amber", "rose", "forest"}},
-	{Name: "bg", Desc: "Background animation", HasArgs: true, SubOptions: []string{"off", "starfield", "tunnel", "plasma", "fire", "matrix", "ocean", "cube"}},
+	{Name: "bg", Desc: "Background animation", HasArgs: true, SubOptions: []string{"off", "starfield", "tunnel", "plasma", "fire", "matrix", "ocean", "cube", "skibidi", "sigma", "npc", "ohio", "rizz", "gyatt", "amogus", "bussin"}},
 	{Name: "model", Desc: "Switch model", Shortcut: ""},
 	{Name: "session", Desc: "Switch session", HasArgs: true},
 	{Name: "agent", Desc: "Switch agent", Shortcut: ""},

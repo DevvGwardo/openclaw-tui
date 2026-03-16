@@ -40,7 +40,7 @@ func CommandHelp(theme Theme) string {
 		{"/session", "Switch session"},
 		{"/think <level>", "Set thinking level (none, adaptive, full)"},
 		{"/theme <name>", "Switch theme (ocean, amber, rose, forest)"},
-		{"/bg [mode]", "Cycle/set background (off, starfield, pipes, dvd, mystify, maze, toasters, matrix)"},
+		{"/bg [mode]", "Cycle/set background (off, starfield, tunnel, plasma, fire, matrix, ocean, cube, skibidi, sigma, npc, ohio, rizz, gyatt, amogus, bussin)"},
 		{"/new", "Reset/create new session"},
 		{"/clear", "Clear chat history"},
 		{"/exit", "Exit the application"},
