@@ -100,5 +100,5 @@ func (a ActivityBarModel) View() string {
 		Foreground(a.theme.Palette.FgMuted).
 		Render(fmt.Sprintf("(%s)", elapsed))
 
-	return fmt.Sprintf("  %s %s %s", spinner, phrase, timer)
+	return fmt.Sprintf("   %s %s %s", spinner, phrase, timer)
 }

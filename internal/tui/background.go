@@ -440,6 +440,8 @@ type BackgroundModel struct {
 	aquariumFish    []aquariumFish
 	aquariumBubbles []aquariumBubble
 	aquariumWeeds   []aquariumWeed
+	aquariumCrabs   []aquariumCrab
+	aquariumTasks   []string // current task labels for crabs to display
 }
 
 // NewBackgroundModel creates a new background renderer.
@@ -1533,23 +1535,101 @@ func (b *BackgroundModel) ApplyToView(view string, width, height int) string {
 	lines := strings.Split(view, "\n")
 	result := make([]string, 0, height)
 
+	// Collect crab task labels to overlay
+	crabLabels := b.CrabLabels()
+	labelsByRow := make(map[int][]crabLabel)
+	for _, cl := range crabLabels {
+		labelsByRow[cl.row] = append(labelsByRow[cl.row], cl)
+	}
+
 	for y := 0; y < height; y++ {
+		var rendered string
 		if y < len(lines) {
 			line := lines[y]
 			stripped := stripAnsi(line)
 
 			if strings.TrimSpace(stripped) == "" {
-				result = append(result, b.RenderLine(y, width))
+				rendered = b.RenderLine(y, width)
 			} else {
-				composed := b.compositeLineWithBg(line, y, width)
-				result = append(result, composed)
+				rendered = b.compositeLineWithBg(line, y, width)
 			}
 		} else {
-			result = append(result, b.RenderLine(y, width))
+			rendered = b.RenderLine(y, width)
 		}
+
+		// Overlay crab task labels on this row
+		if labels, ok := labelsByRow[y]; ok {
+			rendered = b.overlayCrabLabels(rendered, labels, y, width)
+		}
+
+		result = append(result, rendered)
 	}
 
 	return strings.Join(result, "\n")
+}
+
+// overlayCrabLabels composites crab task label text onto a rendered background line.
+func (b *BackgroundModel) overlayCrabLabels(line string, labels []crabLabel, row, totalWidth int) string {
+	// Build a character map of what to overlay
+	type overlayChar struct {
+		ch   rune
+		r, g, bv int
+	}
+	overlays := make(map[int]overlayChar)
+	for _, cl := range labels {
+		runes := []rune(cl.text)
+		// Center the label on the crab position
+		startCol := cl.col - len(runes)/2
+		for i, ch := range runes {
+			col := startCol + i
+			if col >= 0 && col < totalWidth {
+				overlays[col] = overlayChar{ch: ch, r: 255, g: 230, bv: 180} // warm white text
+			}
+		}
+	}
+
+	if len(overlays) == 0 {
+		return line
+	}
+
+	// Walk the rendered line and replace characters at overlay positions
+	runes := []rune(line)
+	var result strings.Builder
+	col := 0
+	i := 0
+
+	for i < len(runes) {
+		// Skip ANSI sequences
+		if runes[i] == '\x1b' && i+1 < len(runes) && runes[i+1] == '[' {
+			j := i + 2
+			for j < len(runes) && !((runes[j] >= 'a' && runes[j] <= 'z') || (runes[j] >= 'A' && runes[j] <= 'Z')) {
+				j++
+			}
+			if j < len(runes) {
+				j++
+			}
+			result.WriteString(string(runes[i:j]))
+			i = j
+			continue
+		}
+
+		if ov, ok := overlays[col]; ok {
+			// Get background color from pixel buffer for this cell
+			bgR, bgG, bgB := b.cellBgColor(row, col)
+			fmt.Fprintf(&result, "\x1b[38;2;%d;%d;%dm\x1b[48;2;%d;%d;%dm%c",
+				ov.r, ov.g, ov.bv, bgR, bgG, bgB, ov.ch)
+			result.WriteString("\x1b[0m")
+			col++
+			i++
+			continue
+		}
+
+		result.WriteRune(runes[i])
+		col++
+		i++
+	}
+
+	return result.String()
 }
 
 // compositeLineWithBg walks through a line's ANSI sequences and injects

@@ -35,9 +35,12 @@ type ToolCall struct {
 	Output string
 }
 
+// msgIndent is the left indent applied to message content for visual hierarchy.
+const msgIndent = "  "
+
 // RenderMessage renders a chat message with the given theme and width.
 func RenderMessage(msg ChatMsg, theme Theme, width int) string {
-	contentWidth := width - 4
+	contentWidth := width - 6
 	if contentWidth < 20 {
 		contentWidth = 20
 	}
@@ -61,7 +64,9 @@ func renderUserMessage(msg ChatMsg, theme Theme, width int) string {
 	ts := theme.Muted.Render(msg.Timestamp.Format("15:04"))
 	header := fmt.Sprintf("%s  %s", prefix, ts)
 
+	// Indent content lines
 	content := theme.UserMessage.Render(msg.Content)
+	content = indentBlock(content, msgIndent)
 
 	return fmt.Sprintf("\n%s\n%s\n", header, content)
 }
@@ -72,23 +77,23 @@ func renderAssistantMessage(msg ChatMsg, theme Theme, width int) string {
 	header := fmt.Sprintf("%s  %s", prefix, ts)
 
 	// Render content with left border
-	content := renderMarkdownSimple(msg.Content, theme, width-3)
+	content := renderMarkdownSimple(msg.Content, theme, width-5)
 	if msg.Streaming {
 		content += theme.Muted.Render(" ▌")
 	}
 
-	// Add left border
+	// Add left border with indent
 	borderChar := theme.AssistBorder.Render("┃")
 	lines := strings.Split(content, "\n")
 	var bordered []string
 	for _, line := range lines {
-		bordered = append(bordered, borderChar+" "+line)
+		bordered = append(bordered, msgIndent+borderChar+" "+line)
 	}
 
 	// Render tool calls
 	var toolLines string
 	for _, tool := range msg.Tools {
-		toolLines += "\n" + renderToolCall(tool, theme, width-3)
+		toolLines += "\n" + msgIndent + renderToolCall(tool, theme, width-5)
 	}
 
 	return fmt.Sprintf("\n%s\n%s%s\n", header, strings.Join(bordered, "\n"), toolLines)
@@ -96,13 +101,24 @@ func renderAssistantMessage(msg ChatMsg, theme Theme, width int) string {
 
 func renderSystemMessage(msg ChatMsg, theme Theme, width int) string {
 	content := theme.SystemMessage.Render(msg.Content)
+	content = indentBlock(content, msgIndent)
 	return fmt.Sprintf("\n%s\n", content)
 }
 
 func renderErrorMessage(msg ChatMsg, theme Theme, width int) string {
 	prefix := theme.ErrorMessage.Render("✗ Error")
 	content := theme.ErrorMessage.Render(msg.Content)
+	content = indentBlock(content, msgIndent)
 	return fmt.Sprintf("\n%s\n%s\n", prefix, content)
+}
+
+// indentBlock prepends indent to each line in the block.
+func indentBlock(s, indent string) string {
+	lines := strings.Split(s, "\n")
+	for i, line := range lines {
+		lines[i] = indent + line
+	}
+	return strings.Join(lines, "\n")
 }
 
 func renderToolCall(tool ToolCall, theme Theme, width int) string {

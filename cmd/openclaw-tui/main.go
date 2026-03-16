@@ -37,7 +37,7 @@ func main() {
 	flag.StringVar(&message, "message", "", "Send message on connect")
 	flag.StringVar(&message, "m", "", "Send message on connect (shorthand)")
 	flag.StringVar(&thinking, "thinking", "adaptive", "Thinking level")
-	flag.StringVar(&theme, "theme", "ocean", "Color theme (ocean, amber, rose, forest, aquarium)")
+	flag.StringVar(&theme, "theme", "aquarium", "Color theme (ocean, amber, rose, forest, aquarium)")
 	flag.BoolVar(&showHelp, "help", false, "Show help")
 	flag.BoolVar(&showHelp, "h", false, "Show help (shorthand)")
 

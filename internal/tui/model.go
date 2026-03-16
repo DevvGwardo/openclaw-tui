@@ -117,6 +117,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case TickMsg:
 		m.activityBar.Tick()
 		m.background.Tick()
+		// Sync tasks to aquarium crabs
+		if m.streaming {
+			m.background.SetTasks([]string{waitingPhrases[m.activityBar.phrase]})
+		} else {
+			m.background.SetTasks(nil)
+		}
 		cmds = append(cmds, m.tickCmd())
 		return m, tea.Batch(cmds...)
 
@@ -184,17 +190,31 @@ func (m Model) View() string {
 		return m.theme.Muted.Render("Goodbye! 🦞\n")
 	}
 
+	margin := strings.Repeat(" ", sideMargin)
+	inner := m.innerWidth()
+
 	header := m.header.View()
 	chat := m.chat.View()
 	activity := m.activityBar.View()
 	input := m.input.View()
 	status := m.statusBar.View()
 
+	// Thin separator line between chat and input
+	sep := m.theme.Muted.Render(strings.Repeat("─", inner))
+
+	// Apply side margins to each section
+	header = addMarginToBlock(header, margin)
+	chat = addMarginToBlock(chat, margin)
+	sep = margin + sep
+	input = addMarginToBlock(input, margin)
+	status = addMarginToBlock(status, margin)
+
 	var view string
 	if activity != "" {
-		view = fmt.Sprintf("%s\n%s\n%s\n%s\n%s", header, chat, activity, input, status)
+		activity = addMarginToBlock(activity, margin)
+		view = fmt.Sprintf("%s\n%s\n%s\n%s\n%s\n%s", header, chat, sep, activity, input, status)
 	} else {
-		view = fmt.Sprintf("%s\n%s\n%s\n%s", header, chat, input, status)
+		view = fmt.Sprintf("%s\n%s\n%s\n%s\n%s", header, chat, sep, input, status)
 	}
 
 	if m.background.IsActive() {
@@ -208,6 +228,15 @@ func (m Model) View() string {
 	}
 
 	return view
+}
+
+// addMarginToBlock prepends a margin string to each line in a block.
+func addMarginToBlock(block, margin string) string {
+	lines := strings.Split(block, "\n")
+	for i, line := range lines {
+		lines[i] = margin + line
+	}
+	return strings.Join(lines, "\n")
 }
 
 // overlayPalette composites the palette view on top of the main view,
@@ -230,22 +259,34 @@ func overlayPalette(base, overlay string, width, height int) string {
 	return strings.Join(baseLines, "\n")
 }
 
+// sideMargin is the horizontal padding on each side of the content area.
+const sideMargin = 2
+
+func (m *Model) innerWidth() int {
+	w := m.width - sideMargin*2
+	if w < 40 {
+		w = 40
+	}
+	return w
+}
+
 func (m *Model) layout() {
-	m.header.SetWidth(m.width)
-	m.statusBar.SetWidth(m.width)
-	m.input.SetWidth(m.width)
-	m.activityBar.SetWidth(m.width)
+	inner := m.innerWidth()
+	m.header.SetWidth(inner)
+	m.statusBar.SetWidth(inner)
+	m.input.SetWidth(inner)
+	m.activityBar.SetWidth(inner)
 	m.background.SetSize(m.width, m.height)
 
-	// Chat gets remaining height: total - header(1) - input(5) - statusbar(1) - activity(1 if active) - borders
-	chatHeight := m.height - 8
+	// Chat gets remaining height: total - header(1) - input(5) - statusbar(1) - separator(1) - activity(1 if active) - borders
+	chatHeight := m.height - 9
 	if m.activityBar.IsActive() {
 		chatHeight--
 	}
 	if chatHeight < 5 {
 		chatHeight = 5
 	}
-	m.chat.SetSize(m.width, chatHeight)
+	m.chat.SetSize(inner, chatHeight)
 }
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
