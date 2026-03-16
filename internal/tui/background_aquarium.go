@@ -6,6 +6,15 @@ import "math"
 
 // --- Aquarium (underwater fish tank screensaver — half-block, color-intensive) ---
 
+type aquariumFood struct {
+	x, y      float64
+	sinkSpeed float64 // how fast it sinks
+	wobble    float64 // horizontal drift phase
+	size      int     // 0=small, 1=medium
+	eaten     bool    // marked for removal
+	age       int     // ticks since dropped
+}
+
 type aquariumCrab struct {
 	x, y       float64
 	speed      float64
@@ -280,11 +289,92 @@ func (b *BackgroundModel) updateAquarium() {
 		}
 	}
 
+	// --- Food particles (update and draw BEFORE fish) ---
+	sandBottom := float64(pH - 4)
+	for i := range b.aquariumFood {
+		food := &b.aquariumFood[i]
+		if food.eaten {
+			continue
+		}
+		food.age++
+		// Dissolve after 300 ticks
+		if food.age > 300 {
+			food.eaten = true
+			continue
+		}
+		// Sink and wobble
+		if food.y < sandBottom {
+			food.y += food.sinkSpeed
+			food.wobble += 0.08
+			food.x += b.fastSin(food.wobble) * 0.3
+		}
+		// Draw food
+		fx := int(food.x)
+		fy := int(food.y)
+		if fx >= 0 && fx < w && fy >= 0 && fy < pH {
+			if food.size == 0 {
+				b.pb.set(fx, fy, 180, 140, 60) // tan pellet
+			} else {
+				b.pb.set(fx, fy, 160, 80, 40)   // reddish flake
+				b.pb.set(fx+1, fy, 160, 80, 40)
+			}
+		}
+	}
+	// Remove eaten food
+	n := 0
+	for i := range b.aquariumFood {
+		if !b.aquariumFood[i].eaten {
+			b.aquariumFood[n] = b.aquariumFood[i]
+			n++
+		}
+	}
+	b.aquariumFood = b.aquariumFood[:n]
+
 	// --- Fish (sorted: far fish first, close fish on top) ---
 	for i := range b.aquariumFish {
 		fish := &b.aquariumFish[i]
 
-		fish.x += fish.speed * fish.dir
+		// Check for nearby food and steer toward it
+		nearestDist := math.MaxFloat64
+		nearestFood := -1
+		for fi := range b.aquariumFood {
+			if b.aquariumFood[fi].eaten {
+				continue
+			}
+			dx := b.aquariumFood[fi].x - fish.x
+			dy := b.aquariumFood[fi].y - fish.y
+			dist := math.Sqrt(dx*dx + dy*dy)
+			if dist < 20.0 && dist < nearestDist {
+				nearestDist = dist
+				nearestFood = fi
+			}
+		}
+
+		if nearestFood >= 0 {
+			// Steer toward food at 1.5x speed
+			food := &b.aquariumFood[nearestFood]
+			dx := food.x - fish.x
+			dy := food.y - fish.y
+			spd := fish.speed * 1.5
+			if dx > 0 {
+				fish.dir = 1
+			} else if dx < 0 {
+				fish.dir = -1
+			}
+			// Move toward food
+			dist := math.Sqrt(dx*dx + dy*dy)
+			if dist > 0 {
+				fish.x += (dx / dist) * spd
+				fish.y += (dy / dist) * spd
+			}
+			// Eat if close enough
+			if dist < 2.0 {
+				food.eaten = true
+			}
+		} else {
+			fish.x += fish.speed * fish.dir
+		}
+
 		fish.wobble += 0.07
 		fish.finPhase += 0.12
 		fish.bodyPhase += 0.05
@@ -300,7 +390,11 @@ func (b *BackgroundModel) updateAquarium() {
 			continue
 		}
 
-		b.drawDetailedFish(fish, fish.x, fish.y+yOff, t)
+		actualY := fish.y + yOff
+		if nearestFood >= 0 {
+			actualY = fish.y // suppress wobble when chasing food
+		}
+		b.drawDetailedFish(fish, fish.x, actualY, t)
 	}
 
 	// --- Crabs ---
@@ -951,6 +1045,26 @@ func (b *BackgroundModel) drawCrab(crab *aquariumCrab, t float64) {
 	}
 }
 
+
+// DropFood drops count food particles near the top of the water.
+func (b *BackgroundModel) DropFood(count int) {
+	if b.width == 0 || b.height == 0 {
+		return
+	}
+	for i := 0; i < count; i++ {
+		size := 0
+		if b.rng.Float64() < 0.35 {
+			size = 1
+		}
+		b.aquariumFood = append(b.aquariumFood, aquariumFood{
+			x:         b.rng.Float64() * float64(b.width),
+			y:         2.0 + b.rng.Float64()*2.0,
+			sinkSpeed: 0.15 + b.rng.Float64()*0.20,
+			wobble:    b.rng.Float64() * math.Pi * 2,
+			size:      size,
+		})
+	}
+}
 
 func abs(x int) int {
 	if x < 0 {

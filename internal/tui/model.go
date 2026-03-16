@@ -591,6 +591,17 @@ func (m Model) handleCommand(cmd *Command) (tea.Model, tea.Cmd) {
 			Timestamp: time.Now(),
 		})
 
+	case "feed":
+		if m.background.Mode() != BgAquarium {
+			m.background.SetMode(BgAquarium)
+		}
+		m.background.DropFood(5)
+		m.chat.AddMessage(ChatMsg{
+			Role:      RoleSystem,
+			Content:   "🐟 Food dropped! Watch the fish swim toward it.",
+			Timestamp: time.Now(),
+		})
+
 	case "new", "reset":
 		m.chat.Clear()
 		m.chat.AddMessage(ChatMsg{

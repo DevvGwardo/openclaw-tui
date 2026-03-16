@@ -441,7 +441,8 @@ type BackgroundModel struct {
 	aquariumBubbles []aquariumBubble
 	aquariumWeeds   []aquariumWeed
 	aquariumCrabs   []aquariumCrab
-	aquariumTasks   []string // current task labels for crabs to display
+	aquariumTasks   []string       // current task labels for crabs to display
+	aquariumFood    []aquariumFood // dropped food particles
 }
 
 // NewBackgroundModel creates a new background renderer.
@@ -473,6 +474,11 @@ func (b *BackgroundModel) fastCos(v float64) float64 {
 }
 
 // SetMode sets the background animation mode.
+// Mode returns the current background mode.
+func (b *BackgroundModel) Mode() BgMode {
+	return b.mode
+}
+
 func (b *BackgroundModel) SetMode(mode BgMode) {
 	b.mode = mode
 	b.frame = 0
