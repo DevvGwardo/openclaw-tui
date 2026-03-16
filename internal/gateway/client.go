@@ -15,7 +15,7 @@ import (
 const (
 	defaultTickInterval = 30 * time.Second
 	maxBackoff          = 30 * time.Second
-	protocolVersion     = 14
+	protocolVersion     = 3
 	clientVersion       = "0.1.0"
 )
 
@@ -98,32 +98,51 @@ func (c *Client) Connect() error {
 		return fmt.Errorf("expected connect.challenge, got type=%q event=%q", frame.Type, frame.Event)
 	}
 
-	// Send connect request
-	resp, err := c.Request(MethodConnect, ConnectParams{
-		MinProtocol: protocolVersion,
-		MaxProtocol: protocolVersion,
-		Client: ClientInfo{
-			ID:          "gateway-client",
-			DisplayName: "openclaw-tui",
-			Version:     clientVersion,
-			Platform:    runtime.GOOS,
-			Mode:        "backend",
+	// Send connect request directly (readLoop not started yet)
+	connectID := uuid.New().String()
+	connectFrame := RequestFrame{
+		Type:   FrameTypeRequest,
+		ID:     connectID,
+		Method: MethodConnect,
+		Params: ConnectParams{
+			MinProtocol: protocolVersion,
+			MaxProtocol: protocolVersion,
+			Client: ClientInfo{
+				ID:          "gateway-client",
+				DisplayName: "openclaw-tui",
+				Version:     clientVersion,
+				Platform:    runtime.GOOS,
+				Mode:        "backend",
+			},
+			Caps: []string{},
+			Auth: AuthInfo{
+				Token:    c.token,
+				Password: c.password,
+			},
+			Role:   "operator",
+			Scopes: []string{"operator.admin"},
 		},
-		Caps: []string{},
-		Auth: AuthInfo{
-			Token:    c.token,
-			Password: c.password,
-		},
-		Role:   "operator",
-		Scopes: []string{"operator.admin"},
-	})
-	if err != nil {
-		return fmt.Errorf("connect request: %w", err)
 	}
-	if !resp.OK {
+	if err := conn.WriteJSON(connectFrame); err != nil {
+		return fmt.Errorf("write connect: %w", err)
+	}
+
+	// Read connect response directly
+	_, rawResp, err := conn.ReadMessage()
+	if err != nil {
+		return fmt.Errorf("read connect response: %w", err)
+	}
+	var respFrame Frame
+	if err := json.Unmarshal(rawResp, &respFrame); err != nil {
+		return fmt.Errorf("parse connect response: %w", err)
+	}
+	if !isResponseFrame(respFrame.Type) {
+		return fmt.Errorf("expected response, got type=%q", respFrame.Type)
+	}
+	if respFrame.OK == nil || !*respFrame.OK {
 		msg := "unknown error"
-		if resp.Error != nil {
-			msg = resp.Error.Message
+		if respFrame.Error != nil {
+			msg = respFrame.Error.Message
 		}
 		return fmt.Errorf("connect rejected: %s", msg)
 	}
