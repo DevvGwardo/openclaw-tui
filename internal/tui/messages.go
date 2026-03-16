@@ -61,7 +61,7 @@ func renderUserMessage(msg ChatMsg, theme Theme, width int) string {
 	ts := theme.Muted.Render(msg.Timestamp.Format("15:04"))
 	header := fmt.Sprintf("%s  %s", prefix, ts)
 
-	content := theme.UserMessage.Width(width).Render(msg.Content)
+	content := theme.UserMessage.Render(msg.Content)
 
 	return fmt.Sprintf("\n%s\n%s\n", header, content)
 }
@@ -95,13 +95,13 @@ func renderAssistantMessage(msg ChatMsg, theme Theme, width int) string {
 }
 
 func renderSystemMessage(msg ChatMsg, theme Theme, width int) string {
-	content := theme.SystemMessage.Width(width).Render(msg.Content)
+	content := theme.SystemMessage.Render(msg.Content)
 	return fmt.Sprintf("\n%s\n", content)
 }
 
 func renderErrorMessage(msg ChatMsg, theme Theme, width int) string {
 	prefix := theme.ErrorMessage.Render("✗ Error")
-	content := theme.ErrorMessage.Width(width).Render(msg.Content)
+	content := theme.ErrorMessage.Render(msg.Content)
 	return fmt.Sprintf("\n%s\n%s\n", prefix, content)
 }
 
