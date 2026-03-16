@@ -1,9 +1,11 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/DevvGwardo/openclaw-tui/internal/gateway"
 	"github.com/DevvGwardo/openclaw-tui/internal/tui"
@@ -57,6 +59,16 @@ func main() {
 		token = os.Getenv("OPENCLAW_TOKEN")
 	}
 
+	// Auto-read token from OpenClaw config if not provided
+	if token == "" && password == "" {
+		if cfgToken, cfgPort := readOpenClawConfig(); cfgToken != "" {
+			token = cfgToken
+			if url == "ws://127.0.0.1:18789" && cfgPort > 0 {
+				url = fmt.Sprintf("ws://127.0.0.1:%d", cfgPort)
+			}
+		}
+	}
+
 	// Create gateway client
 	gw := gateway.NewClient(url, token, password)
 
@@ -82,6 +94,30 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+// readOpenClawConfig reads gateway auth token and port from ~/.openclaw/openclaw.json
+func readOpenClawConfig() (token string, port int) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", 0
+	}
+	data, err := os.ReadFile(filepath.Join(home, ".openclaw", "openclaw.json"))
+	if err != nil {
+		return "", 0
+	}
+	var cfg struct {
+		Gateway struct {
+			Port int    `json:"port"`
+			Auth struct {
+				Token string `json:"token"`
+			} `json:"auth"`
+		} `json:"gateway"`
+	}
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return "", 0
+	}
+	return cfg.Gateway.Auth.Token, cfg.Gateway.Port
 }
 
 func printUsage() {
