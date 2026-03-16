@@ -433,7 +433,7 @@ func (m Model) handleCommand(cmd *Command) (tea.Model, tea.Cmd) {
 			if !valid {
 				m.chat.AddMessage(ChatMsg{
 					Role:      RoleError,
-					Content:   fmt.Sprintf("Unknown background mode: %s\nAvailable: off, wave, matrix, aurora, rain, particles, pulse", cmd.Args),
+					Content:   fmt.Sprintf("Unknown background mode: %s\nAvailable: off, starfield, tunnel, plasma, fire, matrix, ocean, cube", cmd.Args),
 					Timestamp: time.Now(),
 				})
 				return m, nil
