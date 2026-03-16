@@ -28,11 +28,12 @@ const (
 	BgGyatt     BgMode = "gyatt"
 	BgAmogus    BgMode = "amogus"
 	BgBussin    BgMode = "bussin"
+	BgAquarium  BgMode = "aquarium"
 )
 
 // BgModes lists all available background modes in cycle order.
 var BgModes = []BgMode{BgOff, BgStarfield, BgTunnel, BgPlasma, BgFire, BgMatrix, BgOcean, BgCube,
-	BgSkibidi, BgSigma, BgNpc, BgOhio, BgRizz, BgGyatt, BgAmogus, BgBussin}
+	BgSkibidi, BgSigma, BgNpc, BgOhio, BgRizz, BgGyatt, BgAmogus, BgBussin, BgAquarium}
 
 // --- Pixel buffer for half-block rendering (color-intensive modes) ---
 
@@ -434,6 +435,11 @@ type BackgroundModel struct {
 	amogusCrews  []amogusCrew
 	amogusSus    int
 	bussinDrops  []bussinDrop
+
+	// Aquarium state
+	aquariumFish    []aquariumFish
+	aquariumBubbles []aquariumBubble
+	aquariumWeeds   []aquariumWeed
 }
 
 // NewBackgroundModel creates a new background renderer.
@@ -539,7 +545,7 @@ func (b *BackgroundModel) isBrailleMode() bool {
 // isPixelMode returns true if the mode uses the pixel buffer (half-block rendering).
 func (b *BackgroundModel) isPixelMode() bool {
 	switch b.mode {
-	case BgTunnel, BgPlasma, BgFire, BgOcean, BgSigma, BgOhio, BgRizz, BgBussin:
+	case BgTunnel, BgPlasma, BgFire, BgOcean, BgSigma, BgOhio, BgRizz, BgBussin, BgAquarium:
 		return true
 	}
 	return false
@@ -586,6 +592,8 @@ func (b *BackgroundModel) initMode() {
 		b.initAmogus()
 	case BgBussin:
 		b.initBussin()
+	case BgAquarium:
+		b.initAquarium()
 	}
 }
 
@@ -1376,6 +1384,8 @@ func (b *BackgroundModel) updateAnimation() {
 		b.updateAmogus()
 	case BgBussin:
 		b.updateBussin()
+	case BgAquarium:
+		b.updateAquarium()
 	}
 }
 

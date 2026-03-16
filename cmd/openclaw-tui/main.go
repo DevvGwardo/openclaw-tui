@@ -37,7 +37,7 @@ func main() {
 	flag.StringVar(&message, "message", "", "Send message on connect")
 	flag.StringVar(&message, "m", "", "Send message on connect (shorthand)")
 	flag.StringVar(&thinking, "thinking", "adaptive", "Thinking level")
-	flag.StringVar(&theme, "theme", "ocean", "Color theme (ocean, amber, rose, forest)")
+	flag.StringVar(&theme, "theme", "ocean", "Color theme (ocean, amber, rose, forest, aquarium)")
 	flag.BoolVar(&showHelp, "help", false, "Show help")
 	flag.BoolVar(&showHelp, "h", false, "Show help (shorthand)")
 
@@ -109,11 +109,17 @@ func main() {
 func readOpenClawConfig() (token string, port int) {
 	home, err := os.UserHomeDir()
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "DEBUG readConfig: homedir err=%v\n", err)
 		return "", 0
 	}
-	data, err := os.ReadFile(filepath.Join(home, ".openclaw", "openclaw.json"))
+	cfgPath := filepath.Join(home, ".openclaw", "openclaw.json")
+	data, err := os.ReadFile(cfgPath)
 	if err != nil {
 		return "", 0
+	}
+	// Strip UTF-8 BOM if present
+	if len(data) >= 3 && data[0] == 0xEF && data[1] == 0xBB && data[2] == 0xBF {
+		data = data[3:]
 	}
 	var cfg struct {
 		Gateway struct {
@@ -144,7 +150,7 @@ FLAGS:
     -s, --session <KEY>      Initial session key (default: agent:main:main)
     -m, --message <MSG>      Send a message on connect
         --thinking <LEVEL>   Thinking level (none, adaptive, full)
-        --theme <NAME>       Color theme (ocean, amber, rose, forest)
+        --theme <NAME>       Color theme (ocean, amber, rose, forest, aquarium)
     -h, --help               Show this help
 
 ENVIRONMENT:

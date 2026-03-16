@@ -420,7 +420,7 @@ func (m Model) handleCommand(cmd *Command) (tea.Model, tea.Cmd) {
 		name := ThemeName(cmd.Args)
 		if cmd.Args == "" {
 			// Show available themes
-			msg := "Available themes: ocean, amber, rose, forest\nUsage: /theme <name>"
+			msg := "Available themes: ocean, amber, rose, forest, aquarium\nUsage: /theme <name>"
 			m.chat.AddMessage(ChatMsg{
 				Role:      RoleSystem,
 				Content:   msg,

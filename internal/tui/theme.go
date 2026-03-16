@@ -6,14 +6,15 @@ import "github.com/charmbracelet/lipgloss"
 type ThemeName string
 
 const (
-	ThemeOcean  ThemeName = "ocean"
-	ThemeAmber  ThemeName = "amber"
-	ThemeRose   ThemeName = "rose"
-	ThemeForest ThemeName = "forest"
+	ThemeOcean    ThemeName = "ocean"
+	ThemeAmber    ThemeName = "amber"
+	ThemeRose     ThemeName = "rose"
+	ThemeForest   ThemeName = "forest"
+	ThemeAquarium ThemeName = "aquarium"
 )
 
 // ThemeNames lists all available themes.
-var ThemeNames = []ThemeName{ThemeOcean, ThemeAmber, ThemeRose, ThemeForest}
+var ThemeNames = []ThemeName{ThemeOcean, ThemeAmber, ThemeRose, ThemeForest, ThemeAquarium}
 
 // Palette defines the colors for a theme.
 type Palette struct {
@@ -87,6 +88,20 @@ var palettes = map[ThemeName]Palette{
 		Error:        lipgloss.Color("#E87070"),
 		UserBg:       lipgloss.Color("#182A1E"),
 		AssistBorder: lipgloss.Color("#6CC890"),
+	},
+	ThemeAquarium: {
+		Primary:      lipgloss.Color("#00B4D8"),
+		Secondary:    lipgloss.Color("#F4A261"),
+		Accent:       lipgloss.Color("#48CAE4"),
+		Bg:           lipgloss.Color("#0A1628"),
+		BgSubtle:     lipgloss.Color("#0F2035"),
+		Fg:           lipgloss.Color("#CAF0F8"),
+		FgMuted:      lipgloss.Color("#5E8BA0"),
+		Success:      lipgloss.Color("#2EC4B6"),
+		Warning:      lipgloss.Color("#F4A261"),
+		Error:        lipgloss.Color("#E76F51"),
+		UserBg:       lipgloss.Color("#0D1E30"),
+		AssistBorder: lipgloss.Color("#00B4D8"),
 	},
 }
 
