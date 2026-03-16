@@ -2,15 +2,20 @@ package tui
 
 import "math"
 
+// Crab pixel art reference: Elthen (https://elthen.itch.io/2d-pixel-art-crab-sprites) - CC-BY compatible
+
 // --- Aquarium (underwater fish tank screensaver — half-block, color-intensive) ---
 
 type aquariumCrab struct {
-	x, y    float64
-	speed   float64
-	dir     float64 // -1 left, +1 right
-	legPhase float64 // leg animation
-	task    string  // task label displayed above the crab
-	variant int     // 0=red, 1=orange, 2=purple
+	x, y       float64
+	speed      float64
+	dir        float64 // -1 left, +1 right
+	legPhase   float64 // leg animation
+	task       string  // task label displayed above the crab
+	variant    int     // 0=red, 1=orange, 2=purple
+	animState  int     // 0=idle, 1=walk, 2=attack(pinch), 3=death
+	animFrame  int     // current frame within the animation (0-3)
+	animTimer  float64 // accumulates to advance frames
 }
 
 type aquariumFish struct {
@@ -311,6 +316,20 @@ func (b *BackgroundModel) updateAquarium() {
 		}
 		if crab.x < 9 {
 			crab.dir = 1
+		}
+
+		// Set animation state based on movement
+		if crab.speed > 0 && crab.task != "" {
+			crab.animState = 1 // walk
+		} else {
+			crab.animState = 0 // idle
+		}
+
+		// Advance animation frame every ~8 ticks
+		crab.animTimer += 1
+		if crab.animTimer >= 8 {
+			crab.animTimer = 0
+			crab.animFrame = (crab.animFrame + 1) % 4
 		}
 
 		b.drawCrab(crab, t)
@@ -697,6 +716,11 @@ func (b *BackgroundModel) syncCrabs() {
 	for i, task := range tasks {
 		if i < len(b.aquariumCrabs) {
 			b.aquariumCrabs[i].task = task
+			if task != "" {
+				b.aquariumCrabs[i].animState = 1 // walk when has task
+			} else {
+				b.aquariumCrabs[i].animState = 0 // idle when no task
+			}
 		} else {
 			b.aquariumCrabs = append(b.aquariumCrabs, b.newCrab(task))
 		}
@@ -758,7 +782,44 @@ func (b *BackgroundModel) drawCrab(crab *aquariumCrab, t float64) {
 		}
 	}
 
-	clawAnim := b.fastSin(crab.legPhase * 0.7)
+	// Animation-state-dependent parameters
+	var bodyBob float64   // extra body bob amplitude
+	var clawScale float64 // claw size multiplier
+	var clawExtend int    // extra claw reach
+	var legAmp float64    // leg movement amplitude
+
+	switch crab.animState {
+	case 0: // idle: subtle claw movement, minimal body bob
+		bodyBob = 0.0
+		clawScale = 1.0
+		clawExtend = 0
+		legAmp = 0.3
+	case 1: // walk: more leg movement, slight body bob, medium claws
+		bodyBob = 0.8
+		clawScale = 1.2
+		clawExtend = 0
+		legAmp = 0.8
+	case 2: // attack: claws extend wide, dramatic
+		bodyBob = 0.3
+		clawScale = 1.6
+		clawExtend = 2
+		legAmp = 0.4
+	default: // death or other
+		bodyBob = 0.0
+		clawScale = 0.5
+		clawExtend = 0
+		legAmp = 0.1
+	}
+
+	// Frame-based claw animation: idle subtly opens/closes, attack snaps
+	framePhase := float64(crab.animFrame) / 4.0 * math.Pi * 2
+	clawAnim := b.fastSin(framePhase) * clawScale
+
+	// Apply extra body bob for walk state
+	if bodyBob > 0 {
+		walkBob := int(b.fastSin(framePhase*2) * bodyBob)
+		cy += walkBob
+	}
 
 	// Shorthand colors
 	oR, oG, oB := cc.outR, cc.outG, cc.outB       // outline
@@ -853,21 +914,31 @@ func (b *BackgroundModel) drawCrab(crab *aquariumCrab, t float64) {
 	setP(eyeX1+d, eyeY, 10, 10, 15)
 	setP(eyeX2+d, eyeY, 10, 10, 15)
 
-	// --- Claws (small, 2-3px protrusions on each side) ---
+	// --- Claws (size/position varies by animation state) ---
 	clawOff := int(clawAnim * 0.5)
 	// Front claw (direction crab faces)
-	setP(cx+d*7, cy-2+clawOff, lR, lG, lB)
-	setP(cx+d*7, cy-3+clawOff, lR, lG, lB)
-	setP(cx+d*8, cy-3+clawOff, lR, lG, lB) // pincer tip
+	setP(cx+d*(7+clawExtend), cy-2+clawOff, lR, lG, lB)
+	setP(cx+d*(7+clawExtend), cy-3+clawOff, lR, lG, lB)
+	setP(cx+d*(8+clawExtend), cy-3+clawOff, lR, lG, lB) // pincer tip
+	// Extra pincer pixel for attack state
+	if crab.animState == 2 {
+		setP(cx+d*(9+clawExtend), cy-3+clawOff, lR, lG, lB)
+		setP(cx+d*(9+clawExtend), cy-4+clawOff, lR, lG, lB)
+	}
 	// Rear claw (opposite side)
-	setP(cx-d*7, cy-2-clawOff, lR, lG, lB)
-	setP(cx-d*7, cy-3-clawOff, lR, lG, lB)
-	setP(cx-d*8, cy-3-clawOff, lR, lG, lB) // pincer tip
+	setP(cx-d*(7+clawExtend), cy-2-clawOff, lR, lG, lB)
+	setP(cx-d*(7+clawExtend), cy-3-clawOff, lR, lG, lB)
+	setP(cx-d*(8+clawExtend), cy-3-clawOff, lR, lG, lB) // pincer tip
+	if crab.animState == 2 {
+		setP(cx-d*(9+clawExtend), cy-3-clawOff, lR, lG, lB)
+		setP(cx-d*(9+clawExtend), cy-4-clawOff, lR, lG, lB)
+	}
 
-	// --- Legs (2-3 stubby nubs per side, hanging below shell) ---
+	// --- Legs (2-3 stubby nubs per side, amplitude varies by animation state) ---
 	for leg := 0; leg < 3; leg++ {
-		phase := crab.legPhase + float64(leg)*1.0
-		legOff := int(b.fastSin(phase) * 0.6)
+		// Use animFrame to offset leg phases for more varied walk cycles
+		phase := crab.legPhase + float64(leg)*1.0 + float64(crab.animFrame)*0.4
+		legOff := int(b.fastSin(phase) * legAmp)
 
 		// Right-side legs
 		lx := cx + 2 + leg*2
