@@ -1,4 +1,13 @@
-node_modules/
-dist/
-*.tsbuildinfo
+# Go binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Go test/build
+*.test
+*.out
+
+# IDE
 .DS_Store
