@@ -39,6 +39,7 @@ type Model struct {
 	input       InputModel
 	statusBar   StatusBarModel
 	activityBar ActivityBarModel
+	background  BackgroundModel
 	theme       Theme
 
 	// State
@@ -69,6 +70,7 @@ func NewModel(gw *gateway.Client, sessionKey, thinking, initMessage string, them
 		input:       NewInputModel(theme),
 		statusBar:   NewStatusBarModel(theme),
 		activityBar: NewActivityBarModel(theme),
+		background:  NewBackgroundModel(theme),
 	}
 }
 
@@ -105,6 +107,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case TickMsg:
 		m.activityBar.Tick()
+		m.background.Tick()
 		cmds = append(cmds, m.tickCmd())
 		return m, tea.Batch(cmds...)
 
@@ -162,10 +165,18 @@ func (m Model) View() string {
 	input := m.input.View()
 	status := m.statusBar.View()
 
+	var view string
 	if activity != "" {
-		return fmt.Sprintf("%s\n%s\n%s\n%s\n%s", header, chat, activity, input, status)
+		view = fmt.Sprintf("%s\n%s\n%s\n%s\n%s", header, chat, activity, input, status)
+	} else {
+		view = fmt.Sprintf("%s\n%s\n%s\n%s", header, chat, input, status)
 	}
-	return fmt.Sprintf("%s\n%s\n%s\n%s", header, chat, input, status)
+
+	if m.background.IsActive() {
+		view = m.background.ApplyToView(view, m.width, m.height)
+	}
+
+	return view
 }
 
 func (m *Model) layout() {
@@ -173,6 +184,7 @@ func (m *Model) layout() {
 	m.statusBar.SetWidth(m.width)
 	m.input.SetWidth(m.width)
 	m.activityBar.SetWidth(m.width)
+	m.background.SetSize(m.width, m.height)
 
 	// Chat gets remaining height: total - header(1) - input(5) - statusbar(1) - activity(1 if active) - borders
 	chatHeight := m.height - 8
@@ -293,6 +305,39 @@ func (m Model) handleCommand(cmd *Command) (tea.Model, tea.Cmd) {
 			Content:   fmt.Sprintf("Theme switched to %s.", cmd.Args),
 			Timestamp: time.Now(),
 		})
+
+	case "bg":
+		if cmd.Args == "" {
+			mode := m.background.CycleMode()
+			m.chat.AddMessage(ChatMsg{
+				Role:      RoleSystem,
+				Content:   fmt.Sprintf("Background: %s", mode),
+				Timestamp: time.Now(),
+			})
+		} else {
+			mode := BgMode(cmd.Args)
+			valid := false
+			for _, m := range BgModes {
+				if m == mode {
+					valid = true
+					break
+				}
+			}
+			if !valid {
+				m.chat.AddMessage(ChatMsg{
+					Role:      RoleError,
+					Content:   fmt.Sprintf("Unknown background mode: %s\nAvailable: off, wave, matrix, aurora, rain, particles, pulse", cmd.Args),
+					Timestamp: time.Now(),
+				})
+				return m, nil
+			}
+			m.background.SetMode(mode)
+			m.chat.AddMessage(ChatMsg{
+				Role:      RoleSystem,
+				Content:   fmt.Sprintf("Background: %s", mode),
+				Timestamp: time.Now(),
+			})
+		}
 
 	case "think":
 		if cmd.Args == "" {
@@ -484,6 +529,7 @@ func (m *Model) setTheme(name ThemeName) {
 	m.input.SetTheme(m.theme)
 	m.statusBar.SetTheme(m.theme)
 	m.activityBar.SetTheme(m.theme)
+	m.background.SetTheme(m.theme)
 }
 
 // Tea commands
