@@ -66,6 +66,12 @@ func (m *InputModel) Reset() {
 	m.textarea.Reset()
 }
 
+// InsertNewline inserts a newline character at the cursor position.
+// Used during bracketed paste to preserve multiline content.
+func (m *InputModel) InsertNewline() {
+	m.textarea.InsertString("\n")
+}
+
 // Focus gives focus to the input.
 func (m *InputModel) Focus() {
 	m.textarea.Focus()

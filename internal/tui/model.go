@@ -295,6 +295,11 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyEnter:
+		// During a bracketed paste, insert a newline instead of submitting
+		if msg.Paste {
+			m.input.InsertNewline()
+			return m, nil
+		}
 		return m.handleSubmit()
 	}
 
@@ -455,7 +460,7 @@ func (m Model) handleCommand(cmd *Command) (tea.Model, tea.Cmd) {
 			if !valid {
 				m.chat.AddMessage(ChatMsg{
 					Role:      RoleError,
-					Content:   fmt.Sprintf("Unknown background mode: %s\nAvailable: off, starfield, tunnel, plasma, fire, matrix, ocean, cube, skibidi, sigma, npc, ohio, rizz, gyatt, amogus, bussin", cmd.Args),
+					Content:   fmt.Sprintf("Unknown background mode: %s\nAvailable: off, starfield, tunnel, plasma, fire, matrix, ocean, cube, skibidi, sigma, npc, ohio, rizz, gyatt, amogus, bussin, aquarium", cmd.Args),
 					Timestamp: time.Now(),
 				})
 				return m, nil
