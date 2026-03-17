@@ -70,6 +70,10 @@ func CommandHelp(theme Theme) string {
 		{"Enter", "Send message"},
 		{"Shift+Enter", "New line"},
 		{"Ctrl+L", "Clear chat"},
+		{"Alt+M", "Toggle mouse mode (scroll wheel vs text select)"},
+		{"PgUp / PgDown", "Scroll chat half page"},
+		{"Ctrl+Up/Down", "Scroll chat one line"},
+		{"Home / End", "Jump to top / bottom of chat"},
 	}
 
 	for _, s := range shortcuts {

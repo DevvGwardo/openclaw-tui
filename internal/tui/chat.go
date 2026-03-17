@@ -110,6 +110,16 @@ func (c *ChatModel) ScrollDown(n int) {
 	c.viewport.LineDown(n)
 }
 
+// ScrollToTop scrolls to the top of the chat.
+func (c *ChatModel) ScrollToTop() {
+	c.viewport.GotoTop()
+}
+
+// ScrollToBottom scrolls to the bottom of the chat.
+func (c *ChatModel) ScrollToBottom() {
+	c.viewport.GotoBottom()
+}
+
 // Update handles viewport events.
 func (c ChatModel) Update(msg tea.Msg) (ChatModel, tea.Cmd) {
 	var cmd tea.Cmd
