@@ -109,6 +109,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 
 	switch msg := msg.(type) {
+	case tea.MouseMsg:
+		switch msg.Button {
+		case tea.MouseButtonWheelUp:
+			m.chat.ScrollUp(3)
+			return m, nil
+		case tea.MouseButtonWheelDown:
+			m.chat.ScrollDown(3)
+			return m, nil
+		}
+		return m, nil
+
 	case tea.KeyMsg:
 		return m.handleKey(msg)
 
@@ -356,6 +367,14 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyCtrlL:
 		m.chat.Clear()
+		return m, nil
+
+	case tea.KeyPgUp:
+		m.chat.ScrollUp(m.chat.Height() / 2)
+		return m, nil
+
+	case tea.KeyPgDown:
+		m.chat.ScrollDown(m.chat.Height() / 2)
 		return m, nil
 
 	case tea.KeyEnter:

@@ -94,8 +94,10 @@ func main() {
 	model.SetURL(url)
 
 	// Run Bubble Tea
+	// WithMouseAllMotion enables scroll wheel without capturing text selection
 	p := tea.NewProgram(model,
 		tea.WithAltScreen(),
+		tea.WithMouseAllMotion(),
 	)
 
 	if _, err := p.Run(); err != nil {

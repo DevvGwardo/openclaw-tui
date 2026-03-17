@@ -85,6 +85,21 @@ func (c *ChatModel) MessageCount() int {
 	return len(c.messages)
 }
 
+// Height returns the viewport height.
+func (c ChatModel) Height() int {
+	return c.viewport.Height
+}
+
+// ScrollUp scrolls the chat up by n lines.
+func (c *ChatModel) ScrollUp(n int) {
+	c.viewport.LineUp(n)
+}
+
+// ScrollDown scrolls the chat down by n lines.
+func (c *ChatModel) ScrollDown(n int) {
+	c.viewport.LineDown(n)
+}
+
 // Update handles viewport events.
 func (c ChatModel) Update(msg tea.Msg) (ChatModel, tea.Cmd) {
 	var cmd tea.Cmd
