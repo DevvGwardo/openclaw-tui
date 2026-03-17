@@ -41,11 +41,16 @@ type aquariumFish struct {
 }
 
 type aquariumBubble struct {
-	x, y   float64
-	speed  float64
-	size   int // 0=tiny, 1=small, 2=medium
-	wobble float64
-	drift  float64
+	x, y      float64
+	speed     float64
+	size      int // 0=tiny, 1=small, 2=medium, 3=large
+	wobble    float64
+	drift     float64
+	age       int     // ticks since spawn
+	squish    float64 // deformation phase (makes bubble wobble/breathe)
+	shimmer   float64 // highlight rotation phase
+	opacity   float64 // 0-1, fades in on spawn and out near top
+	splitting bool    // true when about to split into smaller bubbles
 }
 
 type aquariumWeed struct {
@@ -178,13 +183,21 @@ func (b *BackgroundModel) newAquariumBubble(randomY bool) aquariumBubble {
 	if randomY {
 		y = b.rng.Float64() * float64(b.height*2)
 	}
+	size := b.rng.Intn(4) // 0=tiny, 1=small, 2=medium, 3=large
+	// Larger bubbles are rarer
+	if size == 3 && b.rng.Float64() > 0.15 {
+		size = 2
+	}
 	return aquariumBubble{
-		x:      b.rng.Float64() * float64(b.width),
-		y:      y,
-		speed:  0.3 + b.rng.Float64()*0.6,
-		size:   b.rng.Intn(3),
-		wobble: b.rng.Float64() * math.Pi * 2,
-		drift:  (b.rng.Float64() - 0.5) * 0.3,
+		x:       b.rng.Float64() * float64(b.width),
+		y:       y,
+		speed:   0.2 + b.rng.Float64()*0.5 + float64(size)*0.08,
+		size:    size,
+		wobble:  b.rng.Float64() * math.Pi * 2,
+		drift:   (b.rng.Float64() - 0.5) * 0.3,
+		squish:  b.rng.Float64() * math.Pi * 2,
+		shimmer: b.rng.Float64() * math.Pi * 2,
+		opacity: 0.0, // fades in
 	}
 }
 
@@ -429,54 +442,191 @@ func (b *BackgroundModel) updateAquarium() {
 		b.drawCrab(crab, t)
 	}
 
-	// --- Bubbles ---
+	// --- Bubbles (animated: wobble, shimmer, fade, split, pop) ---
+	var newBubbles []aquariumBubble
 	for i := range b.aquariumBubbles {
 		bub := &b.aquariumBubbles[i]
+		bub.age++
 		bub.y -= bub.speed
-		bub.wobble += 0.06
-		xOff := b.fastSin(bub.wobble) * 0.8
+		bub.wobble += 0.06 + float64(bub.size)*0.01
+		bub.squish += 0.09 + float64(bub.size)*0.02
+		bub.shimmer += 0.14
 
-		if bub.y < -2 {
+		// Fade in over first 10 ticks
+		if bub.opacity < 1.0 {
+			bub.opacity += 0.1
+			if bub.opacity > 1.0 {
+				bub.opacity = 1.0
+			}
+		}
+		// Fade out near top (last 15% of height)
+		topFade := 1.0
+		fadeZone := float64(pH) * 0.15
+		if bub.y < fadeZone {
+			topFade = bub.y / fadeZone
+			if topFade < 0 {
+				topFade = 0
+			}
+		}
+
+		// Speed varies slightly — larger bubbles accelerate as they rise
+		bub.speed += float64(bub.size) * 0.002
+
+		// Large bubbles can split into 2 smaller ones
+		if bub.size >= 2 && bub.y < float64(pH)*0.3 && !bub.splitting && b.rng.Float64() < 0.008 {
+			bub.splitting = true
+			// Spawn two smaller bubbles
+			for s := 0; s < 2; s++ {
+				child := b.newAquariumBubble(false)
+				child.x = bub.x + (b.rng.Float64()-0.5)*3.0
+				child.y = bub.y
+				child.size = bub.size - 1
+				child.speed = bub.speed * (0.8 + b.rng.Float64()*0.4)
+				child.opacity = bub.opacity * 0.8
+				newBubbles = append(newBubbles, child)
+			}
+		}
+
+		// Remove if off screen, fully faded, or just split
+		if bub.y < -3 || (bub.splitting && bub.age > 2) || topFade < 0.05 {
 			b.aquariumBubbles[i] = b.newAquariumBubble(false)
 			continue
 		}
 
+		// Sinusoidal drift path
+		xOff := b.fastSin(bub.wobble) * (0.8 + float64(bub.size)*0.3)
 		bx := int(bub.x + xOff + bub.drift*float64(b.frame))
 		by := int(bub.y)
 		bx = ((bx % w) + w) % w
 
 		depthFrac := bub.y / float64(pH)
-		bright := 0.3 + (1.0-depthFrac)*0.4
+		bright := 0.3 + (1.0-depthFrac)*0.5
+		alpha := bub.opacity * topFade
 
-		br := uint8(clampF(120*bright, 0, 255))
-		bg := uint8(clampF(200*bright, 0, 255))
-		bb := uint8(clampF(255*bright, 0, 255))
+		// Squish deformation: bubble breathing/wobbling
+		squishX := 1.0 + b.fastSin(bub.squish)*0.15
+		squishY := 1.0 - b.fastSin(bub.squish)*0.15
+
+		// Shimmer highlight position rotates around the bubble
+		shimX := b.fastSin(bub.shimmer) * 0.6
+		shimY := b.fastSin(bub.shimmer+math.Pi*0.5) * 0.6
+
+		// Base bubble color (translucent blue-white)
+		baseR := 120.0 * bright
+		baseG := 200.0 * bright
+		baseB := 255.0 * bright
+		// Highlight color (brighter white-blue)
+		hiR := 200.0 * bright
+		hiG := 240.0 * bright
+		hiB := 255.0 * bright
+		// Edge/rim color (slightly darker, more blue)
+		rimR := 80.0 * bright
+		rimG := 160.0 * bright
+		rimB := 240.0 * bright
+
+		// Blend a bubble pixel onto the background
+		bubbleBlend := func(px, py int, r, g, bv, a float64) {
+			a *= alpha
+			if a <= 0 || px < 0 || px >= w || py < 0 || py >= pH {
+				return
+			}
+			existing := b.pb.get(px, py)
+			nr := float64(existing.r)*(1-a) + r*a
+			ng := float64(existing.g)*(1-a) + g*a
+			nb := float64(existing.b)*(1-a) + bv*a
+			b.pb.set(px, py, uint8(clampF(nr, 0, 255)), uint8(clampF(ng, 0, 255)), uint8(clampF(nb, 0, 255)))
+		}
 
 		switch bub.size {
-		case 0:
-			b.pb.set(bx, by, br, bg, bb)
-		case 1:
-			b.pb.set(bx, by, br, bg, bb)
-			b.pb.set(bx+1, by, br, bg, bb)
-		case 2:
-			// Small circle
-			b.pb.set(bx, by, br, bg, bb)
-			b.pb.set(bx+1, by, br, bg, bb)
-			b.pb.set(bx-1, by, br, bg, bb)
-			b.pb.set(bx, by-1, br, bg, bb)
-			b.pb.set(bx+1, by-1, br, bg, bb)
-			b.pb.set(bx, by+1, br, bg, bb)
-			// Highlight
-			hr := uint8(clampF(200*bright, 0, 255))
-			hg := uint8(clampF(240*bright, 0, 255))
-			hb := uint8(clampF(255*bright, 0, 255))
-			b.pb.set(bx, by-1, hr, hg, hb)
+		case 0: // tiny: single pixel, pulses
+			pulse := 0.7 + b.fastSin(bub.shimmer*2)*0.3
+			bubbleBlend(bx, by, baseR*pulse, baseG*pulse, baseB*pulse, 0.6)
+
+		case 1: // small: 2-3 pixels with shimmer highlight
+			bubbleBlend(bx, by, baseR, baseG, baseB, 0.5)
+			sx := bx + int(squishX)
+			bubbleBlend(sx, by, baseR, baseG, baseB, 0.5)
+			// Shimmer highlight
+			hx := bx + int(shimX+0.5)
+			hy := by + int(shimY-0.5)
+			bubbleBlend(hx, hy, hiR, hiG, hiB, 0.35)
+
+		case 2: // medium: ~5px circle, deforms, has rim + highlight
+			// Core (squished ellipse)
+			bubbleBlend(bx, by, baseR, baseG, baseB, 0.4)
+			bubbleBlend(bx+int(squishX), by, baseR, baseG, baseB, 0.4)
+			bubbleBlend(bx-int(squishX), by, baseR, baseG, baseB, 0.35)
+			bubbleBlend(bx, by-int(squishY), baseR, baseG, baseB, 0.4)
+			bubbleBlend(bx, by+int(squishY), baseR, baseG, baseB, 0.35)
+			// Additional body pixel
+			bubbleBlend(bx+int(squishX), by-int(squishY), baseR, baseG, baseB, 0.3)
+			// Rim (edge pixels, slightly darker)
+			bubbleBlend(bx-int(squishX)-1, by, rimR, rimG, rimB, 0.2)
+			bubbleBlend(bx+int(squishX)+1, by, rimR, rimG, rimB, 0.2)
+			bubbleBlend(bx, by+int(squishY)+1, rimR, rimG, rimB, 0.2)
+			// Animated highlight (rotates)
+			hx := bx + int(shimX*1.2)
+			hy := by + int(shimY*1.2) - 1
+			bubbleBlend(hx, hy, hiR, hiG, hiB, 0.5)
+
+		case 3: // large: ~8px circle, pronounced wobble, dual highlights
+			// Outer rim ring
+			for angle := 0.0; angle < math.Pi*2; angle += math.Pi / 4 {
+				rx := int(math.Cos(angle)*2.5*squishX + 0.5)
+				ry := int(math.Sin(angle)*2.5*squishY + 0.5)
+				bubbleBlend(bx+rx, by+ry, rimR, rimG, rimB, 0.25)
+			}
+			// Inner body fill
+			for dy := -1; dy <= 1; dy++ {
+				for dx := -1; dx <= 1; dx++ {
+					sx := int(float64(dx) * squishX)
+					sy := int(float64(dy) * squishY)
+					a := 0.35
+					if dx == 0 && dy == 0 {
+						a = 0.45
+					}
+					bubbleBlend(bx+sx, by+sy, baseR, baseG, baseB, a)
+				}
+			}
+			// Extended body pixels along squish axes
+			bubbleBlend(bx+int(squishX*2), by, baseR, baseG, baseB, 0.3)
+			bubbleBlend(bx-int(squishX*2), by, baseR, baseG, baseB, 0.3)
+			bubbleBlend(bx, by-int(squishY*2), baseR, baseG, baseB, 0.3)
+			bubbleBlend(bx, by+int(squishY*2), baseR, baseG, baseB, 0.25)
+			// Primary highlight (top-left area, rotates)
+			hx1 := bx + int(shimX*1.5) - 1
+			hy1 := by + int(shimY*1.5) - 1
+			bubbleBlend(hx1, hy1, hiR, hiG, hiB, 0.55)
+			bubbleBlend(hx1+1, hy1, hiR, hiG, hiB, 0.35)
+			// Secondary smaller highlight (opposite side)
+			hx2 := bx - int(shimX*0.8) + 1
+			hy2 := by - int(shimY*0.8) + 1
+			bubbleBlend(hx2, hy2, hiR, hiG, hiB, 0.25)
 		}
 	}
 
-	if b.rng.Float64() < 0.08 {
-		b.aquariumBubbles = append(b.aquariumBubbles, b.newAquariumBubble(false))
-		if len(b.aquariumBubbles) > 30 {
+	// Add child bubbles from splits
+	b.aquariumBubbles = append(b.aquariumBubbles, newBubbles...)
+
+	// Spawn new bubbles (from seaweed bases, fish, and random)
+	spawnRate := 0.10
+	if b.rng.Float64() < spawnRate {
+		nb := b.newAquariumBubble(false)
+		// 30% chance to spawn from a seaweed position
+		if len(b.aquariumWeeds) > 0 && b.rng.Float64() < 0.3 {
+			weed := b.aquariumWeeds[b.rng.Intn(len(b.aquariumWeeds))]
+			nb.x = float64(weed.x) + (b.rng.Float64()-0.5)*2.0
+			nb.y = float64(pH-4-weed.height) + b.rng.Float64()*2.0
+		}
+		// 15% chance to spawn from a fish position (fish exhale)
+		if len(b.aquariumFish) > 0 && b.rng.Float64() < 0.15 {
+			fish := b.aquariumFish[b.rng.Intn(len(b.aquariumFish))]
+			nb.x = fish.x + fish.dir*3.0
+			nb.y = fish.y - 1.0
+			nb.size = 0 // fish bubbles are always tiny
+		}
+		b.aquariumBubbles = append(b.aquariumBubbles, nb)
+		if len(b.aquariumBubbles) > 40 {
 			b.aquariumBubbles = b.aquariumBubbles[1:]
 		}
 	}
