@@ -3,10 +3,38 @@ package tui
 import (
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
 )
+
+// glamourRenderer caches a glamour renderer instance per word-wrap width.
+var (
+	glamourMu       sync.Mutex
+	glamourCache    *glamour.TermRenderer
+	glamourCacheW   int
+)
+
+// getGlamourRenderer returns a cached glamour renderer for the given width.
+func getGlamourRenderer(width int) *glamour.TermRenderer {
+	glamourMu.Lock()
+	defer glamourMu.Unlock()
+	if glamourCache != nil && glamourCacheW == width {
+		return glamourCache
+	}
+	r, err := glamour.NewTermRenderer(
+		glamour.WithStandardStyle("dark"),
+		glamour.WithWordWrap(width),
+	)
+	if err != nil {
+		return nil
+	}
+	glamourCache = r
+	glamourCacheW = width
+	return r
+}
 
 // MsgRole identifies who sent a message.
 type MsgRole string
@@ -76,8 +104,8 @@ func renderAssistantMessage(msg ChatMsg, theme Theme, width int) string {
 	ts := theme.Muted.Render(msg.Timestamp.Format("15:04"))
 	header := fmt.Sprintf("%s  %s", prefix, ts)
 
-	// Render content with left border
-	content := renderMarkdownSimple(msg.Content, theme, width-5)
+	// Render content with glamour markdown
+	content := renderGlamourMarkdown(msg.Content, width-5)
 	if msg.Streaming {
 		content += theme.Muted.Render(" ▌")
 	}
@@ -148,92 +176,21 @@ func renderToolCall(tool ToolCall, theme Theme, width int) string {
 	return header
 }
 
-// renderMarkdownSimple does basic markdown rendering (bold, italic, code).
-func renderMarkdownSimple(text string, theme Theme, width int) string {
-	// Basic code block handling
-	var result strings.Builder
-	lines := strings.Split(text, "\n")
-	inCodeBlock := false
-
-	for _, line := range lines {
-		if strings.HasPrefix(line, "```") {
-			inCodeBlock = !inCodeBlock
-			if inCodeBlock {
-				lang := strings.TrimPrefix(line, "```")
-				if lang != "" {
-					result.WriteString(theme.Muted.Render("  ─── " + lang + " ───"))
-				} else {
-					result.WriteString(theme.Muted.Render("  ──────"))
-				}
-				result.WriteString("\n")
-			} else {
-				result.WriteString(theme.Muted.Render("  ──────"))
-				result.WriteString("\n")
-			}
-			continue
-		}
-
-		if inCodeBlock {
-			result.WriteString(theme.CodeBlock.Render("  " + line))
-			result.WriteString("\n")
-			continue
-		}
-
-		// Inline formatting
-		rendered := renderInlineMarkdown(line, theme)
-		result.WriteString(rendered)
-		result.WriteString("\n")
+// renderGlamourMarkdown renders markdown content using the glamour library.
+// Falls back to plain text if glamour fails.
+func renderGlamourMarkdown(text string, width int) string {
+	if width < 10 {
+		width = 10
 	}
-
-	s := result.String()
-	if strings.HasSuffix(s, "\n") {
-		s = s[:len(s)-1]
+	r := getGlamourRenderer(width)
+	if r == nil {
+		return text
 	}
-	return s
-}
-
-// renderInlineMarkdown handles bold, italic, and inline code.
-func renderInlineMarkdown(line string, theme Theme) string {
-	// Very simple: replace **bold** and *italic* and `code`
-	// A full markdown parser would be heavier; this covers the common cases.
-	line = replaceInlinePatterns(line, "**", lipgloss.NewStyle().Bold(true).Foreground(theme.Palette.Fg))
-	line = replaceInlinePatterns(line, "*", lipgloss.NewStyle().Italic(true).Foreground(theme.Palette.Fg))
-	line = replaceInlineCode(line, theme)
-	return line
-}
-
-func replaceInlinePatterns(s, delim string, style lipgloss.Style) string {
-	for {
-		start := strings.Index(s, delim)
-		if start == -1 {
-			break
-		}
-		end := strings.Index(s[start+len(delim):], delim)
-		if end == -1 {
-			break
-		}
-		end += start + len(delim)
-		inner := s[start+len(delim) : end]
-		rendered := style.Render(inner)
-		s = s[:start] + rendered + s[end+len(delim):]
+	rendered, err := r.Render(text)
+	if err != nil {
+		return text
 	}
-	return s
-}
-
-func replaceInlineCode(s string, theme Theme) string {
-	for {
-		start := strings.Index(s, "`")
-		if start == -1 {
-			break
-		}
-		end := strings.Index(s[start+1:], "`")
-		if end == -1 {
-			break
-		}
-		end += start + 1
-		inner := s[start+1 : end]
-		rendered := theme.CodeBlock.Render(inner)
-		s = s[:start] + rendered + s[end+1:]
-	}
-	return s
+	// Glamour adds trailing newlines; trim them for consistent formatting.
+	rendered = strings.TrimRight(rendered, "\n")
+	return rendered
 }
