@@ -46,24 +46,35 @@ func (c *ChatModel) SetTheme(t Theme) {
 	c.renderAll()
 }
 
+// atBottom reports whether the viewport is scrolled to (or near) the bottom.
+func (c *ChatModel) atBottom() bool {
+	return c.viewport.AtBottom() || c.viewport.TotalLineCount() <= c.viewport.Height
+}
+
 // AddMessage appends a message to the log.
 func (c *ChatModel) AddMessage(msg ChatMsg) {
+	wasAtBottom := c.atBottom()
 	c.messages = append(c.messages, msg)
 	c.renderCache = append(c.renderCache, "")
 	c.dirty = append(c.dirty, true)
 	c.renderAll()
-	c.viewport.GotoBottom()
+	if wasAtBottom {
+		c.viewport.GotoBottom()
+	}
 }
 
 // UpdateLastAssistant updates the last assistant message (for streaming).
 func (c *ChatModel) UpdateLastAssistant(content string, streaming bool) {
+	wasAtBottom := c.atBottom()
 	for i := len(c.messages) - 1; i >= 0; i-- {
 		if c.messages[i].Role == RoleAssistant {
 			c.messages[i].Content = content
 			c.messages[i].Streaming = streaming
 			c.dirty[i] = true
 			c.renderAll()
-			c.viewport.GotoBottom()
+			if wasAtBottom {
+				c.viewport.GotoBottom()
+			}
 			return
 		}
 	}
@@ -71,12 +82,15 @@ func (c *ChatModel) UpdateLastAssistant(content string, streaming bool) {
 
 // AddToolToLastAssistant adds a tool call to the last assistant message.
 func (c *ChatModel) AddToolToLastAssistant(tool ToolCall) {
+	wasAtBottom := c.atBottom()
 	for i := len(c.messages) - 1; i >= 0; i-- {
 		if c.messages[i].Role == RoleAssistant {
 			c.messages[i].Tools = append(c.messages[i].Tools, tool)
 			c.dirty[i] = true
 			c.renderAll()
-			c.viewport.GotoBottom()
+			if wasAtBottom {
+				c.viewport.GotoBottom()
+			}
 			return
 		}
 	}

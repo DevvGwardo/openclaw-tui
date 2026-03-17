@@ -208,15 +208,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	// Pass through to input
+	// Pass through to input only — do NOT forward to chat viewport here.
+	// The viewport has its own key handlers (Up/Down/PgUp/PgDown) that
+	// conflict with the textarea, causing unwanted scrolling when the
+	// user types. Chat scrolling is handled explicitly via keybindings
+	// above (PgUp, PgDown, Home, End, Ctrl+Up, Ctrl+Down).
 	var inputCmd tea.Cmd
 	m.input, inputCmd = m.input.Update(msg)
 	cmds = append(cmds, inputCmd)
-
-	// Pass through to chat viewport
-	var chatCmd tea.Cmd
-	m.chat, chatCmd = m.chat.Update(msg)
-	cmds = append(cmds, chatCmd)
 
 	return m, tea.Batch(cmds...)
 }
