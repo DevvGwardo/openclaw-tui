@@ -826,7 +826,11 @@ func (m Model) listenGateway() tea.Cmd {
 }
 
 func (m Model) tickCmd() tea.Cmd {
-	return tea.Tick(100*time.Millisecond, func(t time.Time) tea.Msg {
+	interval := 500 * time.Millisecond
+	if m.streaming || m.background.IsActive() {
+		interval = 100 * time.Millisecond
+	}
+	return tea.Tick(interval, func(t time.Time) tea.Msg {
 		return TickMsg(t)
 	})
 }
