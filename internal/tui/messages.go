@@ -104,10 +104,14 @@ func renderAssistantMessage(msg ChatMsg, theme Theme, width int) string {
 	ts := theme.Muted.Render(msg.Timestamp.Format("15:04"))
 	header := fmt.Sprintf("%s  %s", prefix, ts)
 
-	// Render content with glamour markdown
-	content := renderGlamourMarkdown(msg.Content, width-5)
+	// While streaming, use cheap plain-text render to avoid glamour overhead per delta.
+	// Once streaming is done, do a single glamour pass for the final message.
+	var content string
 	if msg.Streaming {
+		content = theme.AssistMessage.Render(msg.Content)
 		content += theme.Muted.Render(" ▌")
+	} else {
+		content = renderGlamourMarkdown(msg.Content, width-5)
 	}
 
 	// Add left border with indent

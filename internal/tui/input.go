@@ -18,6 +18,7 @@ type InputModel struct {
 func NewInputModel(theme Theme) InputModel {
 	ta := textarea.New()
 	ta.Placeholder = "Type a message... (Enter to send, Shift+Enter for newline)"
+	ta.Prompt = "" // no prompt character inside the textarea
 	ta.ShowLineNumbers = false
 	ta.CharLimit = 0
 	ta.SetHeight(3)
@@ -28,9 +29,10 @@ func NewInputModel(theme Theme) InputModel {
 	ta.FocusedStyle.CursorLine = lipgloss.NewStyle()
 	ta.FocusedStyle.Placeholder = lipgloss.NewStyle().Foreground(theme.Palette.FgMuted)
 	ta.FocusedStyle.Text = lipgloss.NewStyle().Foreground(theme.Palette.Fg)
-	ta.FocusedStyle.Prompt = lipgloss.NewStyle().Foreground(theme.Palette.Primary)
+	ta.FocusedStyle.Prompt = lipgloss.NewStyle()
 	ta.BlurredStyle.Placeholder = lipgloss.NewStyle().Foreground(theme.Palette.FgMuted)
 	ta.BlurredStyle.Text = lipgloss.NewStyle().Foreground(theme.Palette.FgMuted)
+	ta.BlurredStyle.Prompt = lipgloss.NewStyle()
 
 	ta.KeyMap.InsertNewline.SetKeys("shift+enter")
 
@@ -53,7 +55,7 @@ func (m *InputModel) SetTheme(t Theme) {
 	m.textarea.Cursor.Style = lipgloss.NewStyle().Foreground(t.Palette.Primary)
 	m.textarea.FocusedStyle.Placeholder = lipgloss.NewStyle().Foreground(t.Palette.FgMuted)
 	m.textarea.FocusedStyle.Text = lipgloss.NewStyle().Foreground(t.Palette.Fg)
-	m.textarea.FocusedStyle.Prompt = lipgloss.NewStyle().Foreground(t.Palette.Primary)
+	m.textarea.FocusedStyle.Prompt = lipgloss.NewStyle()
 }
 
 // Value returns the current input text.
@@ -93,12 +95,11 @@ func (m InputModel) Update(msg tea.Msg) (InputModel, tea.Cmd) {
 
 // View renders the input area.
 func (m InputModel) View() string {
-	prompt := m.theme.InputPrompt.Render("› ")
 	border := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(m.theme.Palette.Primary).
 		Padding(0, 1).
 		Width(m.width - 2)
 
-	return border.Render(prompt + m.textarea.View())
+	return border.Render(m.textarea.View())
 }
