@@ -1247,6 +1247,13 @@ type crabLabel struct {
 	text string // task text
 }
 
+// speechBubbleLine is one row of a speech bubble overlay.
+type speechBubbleLine struct {
+	row  int    // terminal row
+	col  int    // starting column
+	text string // pre-rendered text (with ANSI colors)
+}
+
 // CrabLabels returns the current crab task labels with their screen positions.
 func (b *BackgroundModel) CrabLabels() []crabLabel {
 	if b.mode != BgAquarium {
@@ -1257,20 +1264,146 @@ func (b *BackgroundModel) CrabLabels() []crabLabel {
 		if crab.task == "" {
 			continue
 		}
-		// Convert pixel coords to terminal row/col
 		col := int(crab.x)
-		row := int(crab.y)/2 - 3 // 3 rows above the crab body
+		row := int(crab.y)/2 - 3
 		if row < 0 {
 			row = 0
 		}
-		// Truncate long tasks
 		task := crab.task
 		if len(task) > 30 {
 			task = task[:27] + "..."
 		}
-		// Add crab emoji prefix
 		task = "🦀 " + task
 		labels = append(labels, crabLabel{col: col, row: row, text: task})
 	}
 	return labels
+}
+
+// CrabSpeechBubbles returns multi-line speech bubble overlays for crabs with tasks.
+// Each bubble is a rounded box with the task text inside and a tail pointing to the crab.
+//
+//	╭──────────────────────╮
+//	│ 🦀 Thinking deeply...│
+//	╰─────────┬────────────╯
+//	          ╱
+func (b *BackgroundModel) CrabSpeechBubbles(termWidth, termHeight int) []speechBubbleLine {
+	if b.mode != BgAquarium {
+		return nil
+	}
+
+	var bubbles []speechBubbleLine
+
+	for _, crab := range b.aquariumCrabs {
+		if crab.task == "" {
+			continue
+		}
+
+		// Truncate task text
+		task := crab.task
+		if len(task) > 35 {
+			task = task[:32] + "..."
+		}
+
+		// Bubble content: " 🦀 task "
+		content := " 🦀 " + task + " "
+		contentLen := len([]rune(content))
+		// Account for emoji width (🦀 takes 2 columns)
+		contentDispW := contentLen + 1 // +1 for emoji extra width
+
+		// Box dimensions
+		boxW := contentDispW + 2 // +2 for left/right border chars
+
+		// Crab terminal position
+		crabCol := int(crab.x)
+		crabRow := int(crab.y) / 2
+
+		// Position bubble: centered above crab, with tail
+		// Bubble sits well above crab (above the input box area)
+		bubbleTopRow := crabRow - 6
+		if bubbleTopRow < 1 {
+			bubbleTopRow = 1
+		}
+
+		// Center the box on crab position
+		startCol := crabCol - boxW/2
+		if startCol < 0 {
+			startCol = 0
+		}
+		if startCol+boxW >= termWidth {
+			startCol = termWidth - boxW - 1
+		}
+		if startCol < 0 {
+			startCol = 0
+		}
+
+		// Tail position: column pointing down to crab
+		tailCol := crabCol
+		if tailCol < startCol+1 {
+			tailCol = startCol + 1
+		}
+		if tailCol > startCol+boxW-2 {
+			tailCol = startCol + boxW - 2
+		}
+
+		// ANSI colors: light background, dark text for readability
+		fgDark := "\x1b[38;2;30;40;50m"   // dark text
+		bgLight := "\x1b[48;2;200;220;235m" // light blue-white bg
+		borderFg := "\x1b[38;2;100;180;210m" // cyan-ish border
+		reset := "\x1b[0m"
+
+		// Row 0: top border  ╭────────╮
+		topInner := boxW - 2
+		if topInner < 0 {
+			topInner = 0
+		}
+		topLine := borderFg + bgLight + "╭" + repeatRune('─', topInner) + "╮" + reset
+		bubbles = append(bubbles, speechBubbleLine{
+			row: bubbleTopRow, col: startCol, text: topLine,
+		})
+
+		// Row 1: content  │ 🦀 task │
+		// Pad content to fill box width
+		padLen := topInner - contentDispW
+		if padLen < 0 {
+			padLen = 0
+		}
+		contentLine := borderFg + bgLight + "│" + fgDark + content + repeatRune(' ', padLen) + borderFg + "│" + reset
+		bubbles = append(bubbles, speechBubbleLine{
+			row: bubbleTopRow + 1, col: startCol, text: contentLine,
+		})
+
+		// Row 2: bottom border with tail notch  ╰────┬────╯
+		tailOffset := tailCol - startCol - 1
+		if tailOffset < 0 {
+			tailOffset = 0
+		}
+		afterTail := topInner - tailOffset - 1
+		if afterTail < 0 {
+			afterTail = 0
+		}
+		botLine := borderFg + bgLight + "╰" + repeatRune('─', tailOffset) + "┬" + repeatRune('─', afterTail) + "╯" + reset
+		bubbles = append(bubbles, speechBubbleLine{
+			row: bubbleTopRow + 2, col: startCol, text: botLine,
+		})
+
+		// Row 3: tail connector  ╱ (angled toward crab)
+		tailChar := borderFg + "╱" + reset
+		bubbles = append(bubbles, speechBubbleLine{
+			row: bubbleTopRow + 3, col: tailCol, text: tailChar,
+		})
+	}
+
+	return bubbles
+}
+
+// repeatRune creates a string of n copies of a rune.
+func repeatRune(r rune, n int) string {
+	if n <= 0 {
+		return ""
+	}
+	b := make([]rune, n)
+	for i := range b {
+		b[i] = r
+	}
+	return string(b)
 }

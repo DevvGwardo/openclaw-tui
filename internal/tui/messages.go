@@ -12,9 +12,9 @@ import (
 
 // glamourRenderer caches a glamour renderer instance per word-wrap width.
 var (
-	glamourMu       sync.Mutex
-	glamourCache    *glamour.TermRenderer
-	glamourCacheW   int
+	glamourMu     sync.Mutex
+	glamourCache  *glamour.TermRenderer
+	glamourCacheW int
 )
 
 // getGlamourRenderer returns a cached glamour renderer for the given width.
@@ -63,94 +63,200 @@ type ToolCall struct {
 	Output string
 }
 
-// msgIndent is the left indent applied to message content for visual hierarchy.
-const msgIndent = "  "
-
 // RenderMessage renders a chat message with the given theme and width.
 func RenderMessage(msg ChatMsg, theme Theme, width int) string {
-	contentWidth := width - 6
-	if contentWidth < 20 {
-		contentWidth = 20
-	}
-
 	switch msg.Role {
 	case RoleUser:
-		return renderUserMessage(msg, theme, contentWidth)
+		return renderUserMessage(msg, theme, width)
 	case RoleAssistant:
-		return renderAssistantMessage(msg, theme, contentWidth)
+		return renderAssistantMessage(msg, theme, width)
 	case RoleSystem:
-		return renderSystemMessage(msg, theme, contentWidth)
+		return renderSystemMessage(msg, theme, width)
 	case RoleError:
-		return renderErrorMessage(msg, theme, contentWidth)
+		return renderErrorMessage(msg, theme, width)
 	default:
 		return msg.Content
 	}
 }
 
 func renderUserMessage(msg ChatMsg, theme Theme, width int) string {
-	prefix := theme.UserPrefix.Render("› You")
-	ts := theme.Muted.Render(msg.Timestamp.Format("15:04"))
-	header := fmt.Sprintf("%s  %s", prefix, ts)
+	p := theme.Palette
 
-	// Indent content lines
-	content := theme.UserMessage.Render(msg.Content)
-	content = indentBlock(content, msgIndent)
+	// ── Header row: name + timestamp ──
+	name := lipgloss.NewStyle().
+		Foreground(p.Secondary).
+		Bold(true).
+		Background(p.UserBg).
+		Render("  You")
+	ts := lipgloss.NewStyle().
+		Foreground(p.FgMuted).
+		Background(p.UserBg).
+		Render(msg.Timestamp.Format("15:04"))
 
-	return fmt.Sprintf("\n%s\n%s\n", header, content)
+	headerGap := width - lipgloss.Width(name) - lipgloss.Width(ts)
+	if headerGap < 1 {
+		headerGap = 1
+	}
+	headerFill := lipgloss.NewStyle().
+		Background(p.UserBg).
+		Render(strings.Repeat(" ", headerGap))
+	header := name + headerFill + ts
+
+	// ── Content with background ──
+	contentWidth := width - 6 // 3 padding each side
+	if contentWidth < 20 {
+		contentWidth = 20
+	}
+	content := lipgloss.NewStyle().
+		Foreground(p.Fg).
+		Width(contentWidth).
+		Render(msg.Content)
+
+	// Wrap content in padded block with background
+	body := lipgloss.NewStyle().
+		Background(p.UserBg).
+		Padding(0, 3).
+		Width(width).
+		Render(content)
+
+	// ── Bottom edge: thin accent line ──
+	accent := lipgloss.NewStyle().
+		Foreground(p.Secondary).
+		Render(strings.Repeat("▔", width))
+
+	return "\n" + header + "\n" + body + "\n" + accent + "\n"
 }
 
 func renderAssistantMessage(msg ChatMsg, theme Theme, width int) string {
-	prefix := theme.AssistPrefix.Render("🦞 Assistant")
-	ts := theme.Muted.Render(msg.Timestamp.Format("15:04"))
-	header := fmt.Sprintf("%s  %s", prefix, ts)
+	p := theme.Palette
 
-	// While streaming, use cheap plain-text render to avoid glamour overhead per delta.
-	// Once streaming is done, do a single glamour pass for the final message.
+	// ── Header row: name + timestamp ──
+	name := lipgloss.NewStyle().
+		Foreground(p.Primary).
+		Bold(true).
+		Background(p.BgSubtle).
+		Render("  🦞 OpenClaw")
+	ts := lipgloss.NewStyle().
+		Foreground(p.FgMuted).
+		Background(p.BgSubtle).
+		Render(msg.Timestamp.Format("15:04"))
+
+	headerGap := width - lipgloss.Width(name) - lipgloss.Width(ts)
+	if headerGap < 1 {
+		headerGap = 1
+	}
+	headerFill := lipgloss.NewStyle().
+		Background(p.BgSubtle).
+		Render(strings.Repeat(" ", headerGap))
+	header := name + headerFill + ts
+
+	// ── Content ──
+	contentWidth := width - 6
+	if contentWidth < 20 {
+		contentWidth = 20
+	}
+
 	var content string
 	if msg.Streaming {
-		content = theme.AssistMessage.Render(msg.Content)
-		content += theme.Muted.Render(" ▌")
+		content = lipgloss.NewStyle().
+			Foreground(p.Fg).
+			Width(contentWidth).
+			Render(msg.Content)
+		content += lipgloss.NewStyle().
+			Foreground(p.FgMuted).
+			Render(" ▌")
 	} else {
-		content = renderGlamourMarkdown(msg.Content, width-5)
+		content = renderGlamourMarkdown(msg.Content, contentWidth)
 	}
 
-	// Add left border with indent
-	borderChar := theme.AssistBorder.Render("┃")
-	lines := strings.Split(content, "\n")
-	var bordered []string
-	for _, line := range lines {
-		bordered = append(bordered, msgIndent+borderChar+" "+line)
+	// Tool calls
+	if len(msg.Tools) > 0 {
+		var toolParts []string
+		for _, tool := range msg.Tools {
+			toolParts = append(toolParts, renderToolCall(tool, theme, contentWidth))
+		}
+		content += "\n" + strings.Join(toolParts, "\n")
 	}
 
-	// Render tool calls
-	var toolLines string
-	for _, tool := range msg.Tools {
-		toolLines += "\n" + msgIndent + renderToolCall(tool, theme, width-5)
-	}
+	body := lipgloss.NewStyle().
+		Background(p.BgSubtle).
+		Padding(0, 3).
+		Width(width).
+		Render(content)
 
-	return fmt.Sprintf("\n%s\n%s%s\n", header, strings.Join(bordered, "\n"), toolLines)
+	// ── Bottom edge: thin accent line ──
+	accent := lipgloss.NewStyle().
+		Foreground(p.Primary).
+		Render(strings.Repeat("▔", width))
+
+	return "\n" + header + "\n" + body + "\n" + accent + "\n"
 }
 
 func renderSystemMessage(msg ChatMsg, theme Theme, width int) string {
-	content := theme.SystemMessage.Render(msg.Content)
-	content = indentBlock(content, msgIndent)
-	return fmt.Sprintf("\n%s\n", content)
+	p := theme.Palette
+
+	// Centered, subtle divider style
+	text := lipgloss.NewStyle().
+		Foreground(p.FgMuted).
+		Italic(true).
+		Render(msg.Content)
+
+	textW := lipgloss.Width(text)
+	sideLen := (width - textW - 2) / 2
+	if sideLen < 1 {
+		sideLen = 1
+	}
+	dash := lipgloss.NewStyle().
+		Foreground(p.BgSubtle).
+		Render(strings.Repeat("─", sideLen))
+
+	return "\n" + dash + " " + text + " " + dash + "\n"
 }
 
 func renderErrorMessage(msg ChatMsg, theme Theme, width int) string {
-	prefix := theme.ErrorMessage.Render("✗ Error")
-	content := theme.ErrorMessage.Render(msg.Content)
-	content = indentBlock(content, msgIndent)
-	return fmt.Sprintf("\n%s\n%s\n", prefix, content)
-}
+	p := theme.Palette
 
-// indentBlock prepends indent to each line in the block.
-func indentBlock(s, indent string) string {
-	lines := strings.Split(s, "\n")
-	for i, line := range lines {
-		lines[i] = indent + line
+	// ── Header row ──
+	name := lipgloss.NewStyle().
+		Foreground(p.Error).
+		Bold(true).
+		Background(p.BgSubtle).
+		Render("  ✗ Error")
+	ts := lipgloss.NewStyle().
+		Foreground(p.FgMuted).
+		Background(p.BgSubtle).
+		Render(msg.Timestamp.Format("15:04"))
+
+	headerGap := width - lipgloss.Width(name) - lipgloss.Width(ts)
+	if headerGap < 1 {
+		headerGap = 1
 	}
-	return strings.Join(lines, "\n")
+	headerFill := lipgloss.NewStyle().
+		Background(p.BgSubtle).
+		Render(strings.Repeat(" ", headerGap))
+	header := name + headerFill + ts
+
+	// ── Content ──
+	contentWidth := width - 6
+	if contentWidth < 20 {
+		contentWidth = 20
+	}
+	content := lipgloss.NewStyle().
+		Foreground(p.Fg).
+		Width(contentWidth).
+		Render(msg.Content)
+
+	body := lipgloss.NewStyle().
+		Background(p.BgSubtle).
+		Padding(0, 3).
+		Width(width).
+		Render(content)
+
+	accent := lipgloss.NewStyle().
+		Foreground(p.Error).
+		Render(strings.Repeat("▔", width))
+
+	return "\n" + header + "\n" + body + "\n" + accent + "\n"
 }
 
 func renderToolCall(tool ToolCall, theme Theme, width int) string {
@@ -162,17 +268,17 @@ func renderToolCall(tool ToolCall, theme Theme, width int) string {
 		icon = "⏳"
 		style = theme.ToolRunning
 	case "done":
-		icon = "✅"
+		icon = "✓"
 		style = theme.ToolDone
 	case "failed":
-		icon = "❌"
+		icon = "✗"
 		style = theme.ToolFailed
 	default:
 		icon = "⏳"
 		style = theme.ToolRunning
 	}
 
-	header := style.Render(fmt.Sprintf("  %s %s", icon, tool.Name))
+	header := style.Render(fmt.Sprintf("%s %s", icon, tool.Name))
 	if tool.Output != "" {
 		output := theme.Muted.Width(width - 4).Render(tool.Output)
 		return header + "\n" + output
@@ -194,7 +300,11 @@ func renderGlamourMarkdown(text string, width int) string {
 	if err != nil {
 		return text
 	}
-	// Glamour adds trailing newlines; trim them for consistent formatting.
+	// Glamour adds trailing newlines and blank lines between paragraphs.
+	// Trim trailing newlines and collapse double blank lines to single.
 	rendered = strings.TrimRight(rendered, "\n")
+	for strings.Contains(rendered, "\n\n\n") {
+		rendered = strings.ReplaceAll(rendered, "\n\n\n", "\n\n")
+	}
 	return rendered
 }

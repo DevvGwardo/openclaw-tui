@@ -84,27 +84,28 @@ func (s StatusBarModel) View() string {
 		connIcon = s.theme.StatusDisconnected.Render("○")
 	}
 
-	sessionItem := s.theme.StatusItem.Render(fmt.Sprintf("📋 %s", s.session))
-	modelItem := s.theme.StatusItem.Render(fmt.Sprintf("🤖 %s", s.model))
+	sessionItem := s.theme.StatusItem.Render(s.session)
+	modelItem := s.theme.StatusItem.Render(s.model)
 
 	tokenStyle := s.tokenStyle()
 	tokenPct := 0
 	if s.maxTokens > 0 {
 		tokenPct = s.tokens * 100 / s.maxTokens
 	}
-	tokenItem := tokenStyle.Render(fmt.Sprintf("🔢 %dk/%dk (%d%%)", s.tokens/1000, s.maxTokens/1000, tokenPct))
+	tokenItem := tokenStyle.Render(fmt.Sprintf("%dk/%dk (%d%%)", s.tokens/1000, s.maxTokens/1000, tokenPct))
 
-	thinkItem := s.theme.StatusItem.Render(fmt.Sprintf("💭 %s", s.thinking))
+	thinkItem := s.theme.StatusItem.Render(s.thinking)
 
 	var mouseItem string
 	if s.mouseMode {
-		mouseItem = s.theme.StatusItem.Render("🖱 mouse")
+		mouseItem = s.theme.StatusItem.Render("scroll")
 	} else {
-		mouseItem = s.theme.StatusItem.Render("📋 select")
+		mouseItem = s.theme.StatusItem.Render("select")
 	}
 
-	left := fmt.Sprintf(" %s %s %s %s", connIcon, sessionItem, modelItem, tokenItem)
-	right := fmt.Sprintf("%s %s ", mouseItem, thinkItem)
+	sep := s.theme.Muted.Render(" · ")
+	left := fmt.Sprintf(" %s %s%s%s%s%s", connIcon, sessionItem, sep, modelItem, sep, tokenItem)
+	right := fmt.Sprintf("%s%s%s ", mouseItem, sep, thinkItem)
 
 	gap := s.width - lipgloss.Width(left) - lipgloss.Width(right)
 	if gap < 0 {

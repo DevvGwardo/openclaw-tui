@@ -332,7 +332,39 @@ func (m *Model) layout() {
 	m.chat.SetSize(inner, chatHeight)
 }
 
+// looksLikeMouseSeq returns true if a string looks like raw SGR or X10 mouse
+// escape sequence data. These leak into key input when the terminal sends mouse
+// codes that bubbletea doesn't parse (e.g. between mode switches).
+func looksLikeMouseSeq(s string) bool {
+	// SGR format: [<Btn;X;YM or [<Btn;X;Ym
+	if strings.Contains(s, "[<") {
+		return true
+	}
+	// X10 format: [M followed by 3 bytes, or partial fragments
+	if strings.Contains(s, "[M") {
+		return true
+	}
+	// Bare numeric fragments like "64;66;36M" from split sequences
+	for _, r := range s {
+		if r != ';' && r != 'M' && r != 'm' && r != '<' && r != '[' && (r < '0' || r > '9') {
+			return false
+		}
+	}
+	// If it's all digits, semicolons, and M/m it's a mouse fragment
+	return len(s) > 2
+}
+
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Discard stray mouse escape sequences that arrive as key input.
+	// When terminals send SGR mouse codes (e.g. [<64;66;36M) and bubbletea
+	// doesn't parse them, they arrive as runes and pollute the textarea.
+	if msg.Type == tea.KeyRunes {
+		s := string(msg.Runes)
+		if looksLikeMouseSeq(s) {
+			return m, nil
+		}
+	}
+
 	// When command palette is active, route keys to it
 	if m.commandPalette.IsActive() {
 		return m.handlePaletteKey(msg)
@@ -350,14 +382,17 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	// Alt+M toggles mouse mode (cell motion for scroll vs full motion)
+	// Alt+M toggles mouse mode: cell motion (scroll) ↔ all motion (full tracking).
+	// Mouse is never fully disabled to avoid raw escape sequences leaking into
+	// the textarea. To select text for copy, hold Shift while clicking/dragging
+	// (supported by most terminals: iTerm2, Terminal.app, Alacritty, WezTerm).
 	if msg.Type == tea.KeyRunes && msg.Alt && string(msg.Runes) == "m" {
 		m.mouseMode = !m.mouseMode
 		m.statusBar.SetMouseMode(m.mouseMode)
 		if m.mouseMode {
-			return m, tea.EnableMouseAllMotion
+			return m, tea.EnableMouseCellMotion
 		}
-		return m, tea.EnableMouseCellMotion
+		return m, tea.EnableMouseAllMotion
 	}
 
 	switch msg.Type {

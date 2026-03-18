@@ -95,7 +95,8 @@ func main() {
 
 	// Run Bubble Tea
 	// Mouse cell motion enables scroll wheel by default (trackpad + mouse).
-	// Press Alt+M to toggle between cell motion (scroll only) and all motion.
+	// Press Alt+M to toggle between cell motion and all motion.
+	// Hold Shift+click/drag to select text for copying in any mode.
 	// Bracketed paste is enabled by default in bubbletea v1 — multi-line
 	// pastes arrive with msg.Paste=true so Enter inserts newlines instead
 	// of submitting.

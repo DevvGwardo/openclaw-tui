@@ -1551,7 +1551,7 @@ func (b *BackgroundModel) ApplyToView(view string, width, height int) string {
 			line := lines[y]
 			stripped := stripAnsi(line)
 
-			if strings.TrimSpace(stripped) == "" {
+			if strings.TrimSpace(stripped) == "" && !hasAnsiBg(line) {
 				rendered = b.RenderLine(y, width)
 			} else {
 				rendered = b.compositeLineWithBg(line, y, width)
@@ -1630,21 +1630,24 @@ func (b *BackgroundModel) overlayCrabLabels(line string, labels []crabLabel, row
 	return result.String()
 }
 
-// OverlayCrabLabelsOnView overlays crab task labels on top of an already-rendered view.
-// This is called after all UI elements are rendered so labels appear above everything.
+// OverlayCrabLabelsOnView overlays crab speech bubbles on top of an already-rendered view.
+// This is called after all UI elements are rendered so bubbles appear above everything.
 func (b *BackgroundModel) OverlayCrabLabelsOnView(view string, width, height int) string {
 	if b.mode != BgAquarium {
 		return view
 	}
 
-	crabLabels := b.CrabLabels()
-	if len(crabLabels) == 0 {
+	bubbleLines := b.CrabSpeechBubbles(width, height)
+	if len(bubbleLines) == 0 {
 		return view
 	}
 
-	labelsByRow := make(map[int][]crabLabel)
-	for _, cl := range crabLabels {
-		labelsByRow[cl.row] = append(labelsByRow[cl.row], cl)
+	// Group bubble lines by row
+	byRow := make(map[int][]speechBubbleLine)
+	for _, bl := range bubbleLines {
+		if bl.row >= 0 && bl.row < height {
+			byRow[bl.row] = append(byRow[bl.row], bl)
+		}
 	}
 
 	lines := strings.Split(view, "\n")
@@ -1658,15 +1661,105 @@ func (b *BackgroundModel) OverlayCrabLabelsOnView(view string, width, height int
 			line = strings.Repeat(" ", width)
 		}
 
-		// Overlay crab task labels on this row
-		if labels, ok := labelsByRow[y]; ok {
-			line = b.overlayCrabLabels(line, labels, y, width)
+		if bls, ok := byRow[y]; ok {
+			line = overlaySpeechBubble(line, bls, width)
 		}
 
 		result = append(result, line)
 	}
 
 	return strings.Join(result, "\n")
+}
+
+// overlaySpeechBubble composites speech bubble text onto a rendered line.
+func overlaySpeechBubble(line string, bubbles []speechBubbleLine, totalWidth int) string {
+	// Build overlay map: column → replacement string
+	type overlaySegment struct {
+		col  int
+		text string
+	}
+	var segments []overlaySegment
+	for _, bl := range bubbles {
+		segments = append(segments, overlaySegment{col: bl.col, text: bl.text})
+	}
+
+	runes := []rune(line)
+	var result strings.Builder
+	col := 0
+	i := 0
+
+	for _, seg := range segments {
+		// Write original content up to the segment start
+		for col < seg.col && i < len(runes) {
+			if runes[i] == '\x1b' && i+1 < len(runes) && runes[i+1] == '[' {
+				j := i + 2
+				for j < len(runes) && !((runes[j] >= 'a' && runes[j] <= 'z') || (runes[j] >= 'A' && runes[j] <= 'Z')) {
+					j++
+				}
+				if j < len(runes) {
+					j++
+				}
+				result.WriteString(string(runes[i:j]))
+				i = j
+				continue
+			}
+			result.WriteRune(runes[i])
+			col++
+			i++
+		}
+
+		// Write the bubble segment
+		result.WriteString(seg.text)
+
+		// Skip over the original characters that the bubble covers
+		segDispW := ansiDisplayWidth(seg.text)
+		skipped := 0
+		for skipped < segDispW && i < len(runes) {
+			if runes[i] == '\x1b' && i+1 < len(runes) && runes[i+1] == '[' {
+				j := i + 2
+				for j < len(runes) && !((runes[j] >= 'a' && runes[j] <= 'z') || (runes[j] >= 'A' && runes[j] <= 'Z')) {
+					j++
+				}
+				if j < len(runes) {
+					j++
+				}
+				i = j
+				continue
+			}
+			i++
+			col++
+			skipped++
+		}
+	}
+
+	// Write remaining original content
+	for i < len(runes) {
+		result.WriteRune(runes[i])
+		i++
+	}
+
+	return result.String()
+}
+
+// ansiDisplayWidth returns the visible character width of a string,
+// ignoring ANSI escape sequences. Counts emoji (simple heuristic).
+func ansiDisplayWidth(s string) int {
+	w := 0
+	inEsc := false
+	for _, r := range s {
+		if r == '\x1b' {
+			inEsc = true
+			continue
+		}
+		if inEsc {
+			if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') {
+				inEsc = false
+			}
+			continue
+		}
+		w++
+	}
+	return w
 }
 
 // compositeLineWithBg walks through a line's ANSI sequences and injects
@@ -1702,6 +1795,11 @@ func (b *BackgroundModel) compositeLineWithBg(line string, row, totalWidth int) 
 
 		if !hasBg && col < totalWidth {
 			bgR, bgG, bgB := b.cellBgColor(row, col)
+			// Blend toward theme background for readability (75% theme, 25% animation)
+			tR, tG, tB := hexToRGB(string(b.theme.Palette.Bg))
+			bgR = (bgR + tR*3) / 4
+			bgG = (bgG + tG*3) / 4
+			bgB = (bgB + tB*3) / 4
 			fmt.Fprintf(&result, "\x1b[48;2;%d;%d;%dm", bgR, bgG, bgB)
 		}
 		result.WriteRune(runes[i])
@@ -1793,6 +1891,12 @@ func stripAnsi(s string) string {
 		result.WriteRune(r)
 	}
 	return result.String()
+}
+
+// hasAnsiBg checks if a string contains ANSI background color sequences,
+// indicating that lipgloss explicitly styled it with a background.
+func hasAnsiBg(s string) bool {
+	return strings.Contains(s, "\x1b[48;") || strings.Contains(s, ";48;")
 }
 
 func maxInt(a, b int) int {
