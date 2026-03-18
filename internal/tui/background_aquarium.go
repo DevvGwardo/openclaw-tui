@@ -472,8 +472,8 @@ func (b *BackgroundModel) updateAquarium() {
 		// Speed varies slightly — larger bubbles accelerate as they rise
 		bub.speed += float64(bub.size) * 0.002
 
-		// Large bubbles can split into 2 smaller ones
-		if bub.size >= 2 && bub.y < float64(pH)*0.3 && !bub.splitting && b.rng.Float64() < 0.008 {
+		// Only large bubbles (size 3) can split into 2 smaller ones
+		if bub.size >= 3 && bub.y < float64(pH)*0.3 && !bub.splitting && b.rng.Float64() < 0.005 {
 			bub.splitting = true
 			// Spawn two smaller bubbles
 			for s := 0; s < 2; s++ {
@@ -624,7 +624,7 @@ func (b *BackgroundModel) updateAquarium() {
 	b.aquariumBubbles = b.aquariumBubbles[:bubbleCount]
 
 	// Spawn new bubbles (from seaweed bases, fish, and random)
-	spawnRate := 0.03
+	spawnRate := 0.015
 	if b.rng.Float64() < spawnRate {
 		nb := b.newAquariumBubble(false)
 		// 30% chance to spawn from a seaweed position
@@ -641,7 +641,7 @@ func (b *BackgroundModel) updateAquarium() {
 			nb.size = 0 // fish bubbles are always tiny
 		}
 		b.aquariumBubbles = append(b.aquariumBubbles, nb)
-		if len(b.aquariumBubbles) > 40 {
+		if len(b.aquariumBubbles) > 25 {
 			b.aquariumBubbles = b.aquariumBubbles[1:]
 		}
 	}
