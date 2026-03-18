@@ -257,6 +257,11 @@ func (m Model) View() string {
 		view = m.background.ApplyToView(view, m.width, m.height)
 	}
 
+	// Overlay crab task labels on top of everything (so they appear above chat UI)
+	if m.background.Mode() == BgAquarium {
+		view = m.background.OverlayCrabLabelsOnView(view, m.width, m.height)
+	}
+
 	// Overlay command palette
 	if m.commandPalette.IsActive() {
 		paletteView := m.commandPalette.View(m.width, m.height)

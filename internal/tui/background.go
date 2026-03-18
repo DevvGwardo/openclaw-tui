@@ -1541,13 +1541,6 @@ func (b *BackgroundModel) ApplyToView(view string, width, height int) string {
 	lines := strings.Split(view, "\n")
 	result := make([]string, 0, height)
 
-	// Collect crab task labels to overlay
-	crabLabels := b.CrabLabels()
-	labelsByRow := make(map[int][]crabLabel)
-	for _, cl := range crabLabels {
-		labelsByRow[cl.row] = append(labelsByRow[cl.row], cl)
-	}
-
 	for y := 0; y < height; y++ {
 		var rendered string
 		if y < len(lines) {
@@ -1561,11 +1554,6 @@ func (b *BackgroundModel) ApplyToView(view string, width, height int) string {
 			}
 		} else {
 			rendered = b.RenderLine(y, width)
-		}
-
-		// Overlay crab task labels on this row
-		if labels, ok := labelsByRow[y]; ok {
-			rendered = b.overlayCrabLabels(rendered, labels, y, width)
 		}
 
 		result = append(result, rendered)
@@ -1636,6 +1624,45 @@ func (b *BackgroundModel) overlayCrabLabels(line string, labels []crabLabel, row
 	}
 
 	return result.String()
+}
+
+// OverlayCrabLabelsOnView overlays crab task labels on top of an already-rendered view.
+// This is called after all UI elements are rendered so labels appear above everything.
+func (b *BackgroundModel) OverlayCrabLabelsOnView(view string, width, height int) string {
+	if b.mode != BgAquarium {
+		return view
+	}
+
+	crabLabels := b.CrabLabels()
+	if len(crabLabels) == 0 {
+		return view
+	}
+
+	labelsByRow := make(map[int][]crabLabel)
+	for _, cl := range crabLabels {
+		labelsByRow[cl.row] = append(labelsByRow[cl.row], cl)
+	}
+
+	lines := strings.Split(view, "\n")
+	result := make([]string, 0, height)
+
+	for y := 0; y < height; y++ {
+		var line string
+		if y < len(lines) {
+			line = lines[y]
+		} else {
+			line = strings.Repeat(" ", width)
+		}
+
+		// Overlay crab task labels on this row
+		if labels, ok := labelsByRow[y]; ok {
+			line = b.overlayCrabLabels(line, labels, y, width)
+		}
+
+		result = append(result, line)
+	}
+
+	return strings.Join(result, "\n")
 }
 
 // compositeLineWithBg walks through a line's ANSI sequences and injects

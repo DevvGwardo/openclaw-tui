@@ -103,12 +103,12 @@ func (b *BackgroundModel) initAquarium() {
 		b.aquariumFish[i] = b.newAquariumFish(true)
 	}
 
-	bubbleCount := b.width / 12
-	if bubbleCount < 4 {
-		bubbleCount = 4
+	bubbleCount := b.width / 20
+	if bubbleCount < 2 {
+		bubbleCount = 2
 	}
-	if bubbleCount > 15 {
-		bubbleCount = 15
+	if bubbleCount > 8 {
+		bubbleCount = 8
 	}
 	b.aquariumBubbles = make([]aquariumBubble, bubbleCount)
 	for i := range b.aquariumBubbles {
@@ -489,7 +489,12 @@ func (b *BackgroundModel) updateAquarium() {
 
 		// Remove if off screen, fully faded, or just split
 		if bub.y < -3 || (bub.splitting && bub.age > 2) || topFade < 0.05 {
-			b.aquariumBubbles[i] = b.newAquariumBubble(false)
+			// Don't replace bubbles that just split - just remove them
+			if bub.splitting && bub.age > 2 {
+				b.aquariumBubbles[i] = aquariumBubble{}
+			} else {
+				b.aquariumBubbles[i] = b.newAquariumBubble(false)
+			}
 			continue
 		}
 
@@ -608,8 +613,18 @@ func (b *BackgroundModel) updateAquarium() {
 	// Add child bubbles from splits
 	b.aquariumBubbles = append(b.aquariumBubbles, newBubbles...)
 
+	// Remove empty slots (bubbles that split and were zeroed out)
+	bubbleCount := 0
+	for i := range b.aquariumBubbles {
+		if b.aquariumBubbles[i].size != 0 || b.aquariumBubbles[i].speed != 0 {
+			b.aquariumBubbles[bubbleCount] = b.aquariumBubbles[i]
+			bubbleCount++
+		}
+	}
+	b.aquariumBubbles = b.aquariumBubbles[:bubbleCount]
+
 	// Spawn new bubbles (from seaweed bases, fish, and random)
-	spawnRate := 0.10
+	spawnRate := 0.03
 	if b.rng.Float64() < spawnRate {
 		nb := b.newAquariumBubble(false)
 		// 30% chance to spawn from a seaweed position
@@ -937,10 +952,15 @@ func (b *BackgroundModel) SetTasks(tasks []string) {
 }
 
 // syncCrabs ensures we have one crab per task, reusing existing crabs where possible.
+// Also updates crab Y positions when the terminal is resized to keep them on the seafloor.
 func (b *BackgroundModel) syncCrabs() {
 	if b.width == 0 || b.height == 0 {
 		return
 	}
+
+	// Calculate the sand Y position based on current height
+	pH := float64(b.height * 2)
+	sandY := pH - 6.0
 
 	tasks := b.aquariumTasks
 
@@ -952,6 +972,8 @@ func (b *BackgroundModel) syncCrabs() {
 			// Clear task labels on existing crabs, keep one
 			b.aquariumCrabs = b.aquariumCrabs[:1]
 			b.aquariumCrabs[0].task = ""
+			// Update Y position to match new height
+			b.aquariumCrabs[0].y = sandY
 		}
 		return
 	}
@@ -960,6 +982,8 @@ func (b *BackgroundModel) syncCrabs() {
 	for i, task := range tasks {
 		if i < len(b.aquariumCrabs) {
 			b.aquariumCrabs[i].task = task
+			// Update Y position to keep crab on seafloor after resize
+			b.aquariumCrabs[i].y = sandY
 			if task != "" {
 				b.aquariumCrabs[i].animState = 1 // walk when has task
 			} else {

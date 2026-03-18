@@ -59,6 +59,10 @@ func (s *StatusBarModel) SetThinking(level string) {
 // SetConnected updates connection status.
 func (s *StatusBarModel) SetConnected(c bool) {
 	s.connected = c
+	// If we're now connected but still showing "connecting...", update to "ready"
+	if c && s.model == "connecting..." {
+		s.model = "ready"
+	}
 }
 
 // SetMouseMode updates the mouse mode indicator.
