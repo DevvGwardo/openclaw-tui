@@ -15,6 +15,7 @@ type StatusBarModel struct {
 	maxTokens  int
 	thinking   string
 	connected  bool
+	mouseMode  bool
 	theme      Theme
 }
 
@@ -60,6 +61,11 @@ func (s *StatusBarModel) SetConnected(c bool) {
 	s.connected = c
 }
 
+// SetMouseMode updates the mouse mode indicator.
+func (s *StatusBarModel) SetMouseMode(on bool) {
+	s.mouseMode = on
+}
+
 // SetTheme updates the theme.
 func (s *StatusBarModel) SetTheme(t Theme) {
 	s.theme = t
@@ -86,8 +92,15 @@ func (s StatusBarModel) View() string {
 
 	thinkItem := s.theme.StatusItem.Render(fmt.Sprintf("💭 %s", s.thinking))
 
+	var mouseItem string
+	if s.mouseMode {
+		mouseItem = s.theme.StatusItem.Render("🖱 mouse")
+	} else {
+		mouseItem = s.theme.StatusItem.Render("📋 select")
+	}
+
 	left := fmt.Sprintf(" %s %s %s %s", connIcon, sessionItem, modelItem, tokenItem)
-	right := fmt.Sprintf("%s ", thinkItem)
+	right := fmt.Sprintf("%s %s ", mouseItem, thinkItem)
 
 	gap := s.width - lipgloss.Width(left) - lipgloss.Width(right)
 	if gap < 0 {

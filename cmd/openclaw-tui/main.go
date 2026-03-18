@@ -94,10 +94,13 @@ func main() {
 	model.SetURL(url)
 
 	// Run Bubble Tea
-	// WithMouseAllMotion enables scroll wheel without capturing text selection
+	// Mouse mode starts OFF so users can select/copy text normally.
+	// Press Alt+M to toggle mouse mode on (enables scroll wheel).
+	// Bracketed paste is enabled by default in bubbletea v1 — multi-line
+	// pastes arrive with msg.Paste=true so Enter inserts newlines instead
+	// of submitting.
 	p := tea.NewProgram(model,
 		tea.WithAltScreen(),
-		tea.WithMouseAllMotion(),
 	)
 
 	if _, err := p.Run(); err != nil {

@@ -67,6 +67,7 @@ type Model struct {
 	ctrlCCount  int
 	lastCtrlC   time.Time
 	quitting    bool
+	mouseMode   bool
 	err         error
 }
 
@@ -110,13 +111,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case tea.MouseMsg:
-		switch msg.Button {
-		case tea.MouseButtonWheelUp:
-			m.chat.ScrollUp(3)
-			return m, nil
-		case tea.MouseButtonWheelDown:
-			m.chat.ScrollDown(3)
-			return m, nil
+		if m.mouseMode {
+			switch msg.Button {
+			case tea.MouseButtonWheelUp:
+				m.chat.ScrollUp(3)
+				return m, nil
+			case tea.MouseButtonWheelDown:
+				m.chat.ScrollDown(3)
+				return m, nil
+			}
 		}
 		return m, nil
 
@@ -205,15 +208,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	// Pass through to input
+	// Pass through to input only — do NOT forward to chat viewport here.
+	// The viewport has its own key handlers (Up/Down/PgUp/PgDown) that
+	// conflict with the textarea, causing unwanted scrolling when the
+	// user types. Chat scrolling is handled explicitly via keybindings
+	// above (PgUp, PgDown, Home, End, Ctrl+Up, Ctrl+Down).
 	var inputCmd tea.Cmd
 	m.input, inputCmd = m.input.Update(msg)
 	cmds = append(cmds, inputCmd)
-
-	// Pass through to chat viewport
-	var chatCmd tea.Cmd
-	m.chat, chatCmd = m.chat.Update(msg)
-	cmds = append(cmds, chatCmd)
 
 	return m, tea.Batch(cmds...)
 }
@@ -329,6 +331,16 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handlePaletteKey(msg)
 	}
 
+	// Alt+M toggles mouse mode
+	if msg.Type == tea.KeyRunes && msg.Alt && string(msg.Runes) == "m" {
+		m.mouseMode = !m.mouseMode
+		m.statusBar.SetMouseMode(m.mouseMode)
+		if m.mouseMode {
+			return m, tea.EnableMouseAllMotion
+		}
+		return m, tea.DisableMouse
+	}
+
 	switch msg.Type {
 	case tea.KeyCtrlC:
 		now := time.Now()
@@ -375,6 +387,22 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyPgDown:
 		m.chat.ScrollDown(m.chat.Height() / 2)
+		return m, nil
+
+	case tea.KeyHome:
+		m.chat.ScrollToTop()
+		return m, nil
+
+	case tea.KeyEnd:
+		m.chat.ScrollToBottom()
+		return m, nil
+
+	case tea.KeyCtrlUp:
+		m.chat.ScrollUp(1)
+		return m, nil
+
+	case tea.KeyCtrlDown:
+		m.chat.ScrollDown(1)
 		return m, nil
 
 	case tea.KeyEnter:
@@ -826,7 +854,11 @@ func (m Model) listenGateway() tea.Cmd {
 }
 
 func (m Model) tickCmd() tea.Cmd {
-	return tea.Tick(100*time.Millisecond, func(t time.Time) tea.Msg {
+	interval := 500 * time.Millisecond
+	if m.streaming || m.background.IsActive() {
+		interval = 100 * time.Millisecond
+	}
+	return tea.Tick(interval, func(t time.Time) tea.Msg {
 		return TickMsg(t)
 	})
 }

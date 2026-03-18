@@ -9,11 +9,13 @@ import (
 
 // ChatModel manages the scrollable chat log.
 type ChatModel struct {
-	viewport viewport.Model
-	messages []ChatMsg
-	theme    Theme
-	width    int
-	height   int
+	viewport    viewport.Model
+	messages    []ChatMsg
+	theme       Theme
+	width       int
+	height      int
+	renderCache []string // cached rendered string per message
+	dirty       []bool   // true if message needs re-render
 }
 
 // NewChatModel creates a new chat viewport.
@@ -33,30 +35,46 @@ func (c *ChatModel) SetSize(w, h int) {
 	c.height = h
 	c.viewport.Width = w
 	c.viewport.Height = h
+	c.invalidateAll()
 	c.renderAll()
 }
 
 // SetTheme updates the theme.
 func (c *ChatModel) SetTheme(t Theme) {
 	c.theme = t
+	c.invalidateAll()
 	c.renderAll()
+}
+
+// atBottom reports whether the viewport is scrolled to (or near) the bottom.
+func (c *ChatModel) atBottom() bool {
+	return c.viewport.AtBottom() || c.viewport.TotalLineCount() <= c.viewport.Height
 }
 
 // AddMessage appends a message to the log.
 func (c *ChatModel) AddMessage(msg ChatMsg) {
+	wasAtBottom := c.atBottom()
 	c.messages = append(c.messages, msg)
+	c.renderCache = append(c.renderCache, "")
+	c.dirty = append(c.dirty, true)
 	c.renderAll()
-	c.viewport.GotoBottom()
+	if wasAtBottom {
+		c.viewport.GotoBottom()
+	}
 }
 
 // UpdateLastAssistant updates the last assistant message (for streaming).
 func (c *ChatModel) UpdateLastAssistant(content string, streaming bool) {
+	wasAtBottom := c.atBottom()
 	for i := len(c.messages) - 1; i >= 0; i-- {
 		if c.messages[i].Role == RoleAssistant {
 			c.messages[i].Content = content
 			c.messages[i].Streaming = streaming
+			c.dirty[i] = true
 			c.renderAll()
-			c.viewport.GotoBottom()
+			if wasAtBottom {
+				c.viewport.GotoBottom()
+			}
 			return
 		}
 	}
@@ -64,11 +82,15 @@ func (c *ChatModel) UpdateLastAssistant(content string, streaming bool) {
 
 // AddToolToLastAssistant adds a tool call to the last assistant message.
 func (c *ChatModel) AddToolToLastAssistant(tool ToolCall) {
+	wasAtBottom := c.atBottom()
 	for i := len(c.messages) - 1; i >= 0; i-- {
 		if c.messages[i].Role == RoleAssistant {
 			c.messages[i].Tools = append(c.messages[i].Tools, tool)
+			c.dirty[i] = true
 			c.renderAll()
-			c.viewport.GotoBottom()
+			if wasAtBottom {
+				c.viewport.GotoBottom()
+			}
 			return
 		}
 	}
@@ -77,6 +99,8 @@ func (c *ChatModel) AddToolToLastAssistant(tool ToolCall) {
 // Clear removes all messages.
 func (c *ChatModel) Clear() {
 	c.messages = nil
+	c.renderCache = nil
+	c.dirty = nil
 	c.viewport.SetContent("")
 }
 
@@ -100,6 +124,16 @@ func (c *ChatModel) ScrollDown(n int) {
 	c.viewport.LineDown(n)
 }
 
+// ScrollToTop scrolls to the top of the chat.
+func (c *ChatModel) ScrollToTop() {
+	c.viewport.GotoTop()
+}
+
+// ScrollToBottom scrolls to the bottom of the chat.
+func (c *ChatModel) ScrollToBottom() {
+	c.viewport.GotoBottom()
+}
+
 // Update handles viewport events.
 func (c ChatModel) Update(msg tea.Msg) (ChatModel, tea.Cmd) {
 	var cmd tea.Cmd
@@ -112,10 +146,24 @@ func (c ChatModel) View() string {
 	return c.viewport.View()
 }
 
+// invalidateAll marks every message as needing re-render (for theme/size changes).
+func (c *ChatModel) invalidateAll() {
+	for i := range c.dirty {
+		c.dirty[i] = true
+	}
+}
+
 func (c *ChatModel) renderAll() {
+	// Re-render only dirty messages, reuse cached strings for the rest.
+	for i, msg := range c.messages {
+		if c.dirty[i] {
+			c.renderCache[i] = RenderMessage(msg, c.theme, c.width)
+			c.dirty[i] = false
+		}
+	}
 	var sb strings.Builder
-	for _, msg := range c.messages {
-		sb.WriteString(RenderMessage(msg, c.theme, c.width))
+	for _, cached := range c.renderCache {
+		sb.WriteString(cached)
 	}
 	c.viewport.SetContent(sb.String())
 }
