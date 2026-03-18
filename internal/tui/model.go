@@ -1,8 +1,10 @@
 package tui
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"mime"
 	"os"
 	"path/filepath"
 	"strings"
@@ -58,17 +60,18 @@ type Model struct {
 	theme          Theme
 
 	// State
-	width       int
-	height      int
-	connected   bool
-	streaming   bool
-	streamBuf   string
-	activeRunID string
-	ctrlCCount  int
-	lastCtrlC   time.Time
-	quitting    bool
-	mouseMode   bool
-	err         error
+	width              int
+	height             int
+	connected          bool
+	streaming          bool
+	streamBuf          string
+	activeRunID        string
+	ctrlCCount         int
+	lastCtrlC          time.Time
+	quitting           bool
+	mouseMode          bool
+	pendingAttachments []gateway.Attachment
+	err                error
 }
 
 // NewModel creates the main TUI model.
@@ -164,7 +167,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.initMessage != "" {
 			msg := m.initMessage
 			m.initMessage = ""
-			cmds = append(cmds, m.sendMessage(msg))
+			cmds = append(cmds, m.sendMessage(msg, nil))
 		}
 		return m, tea.Batch(cmds...)
 
@@ -511,14 +514,29 @@ func (m Model) handleSubmit() (tea.Model, tea.Cmd) {
 		return m.handleCommand(cmd)
 	}
 
+	// Build display content with attachment indicators
+	displayContent := text
+	if len(m.pendingAttachments) > 0 {
+		var names []string
+		for _, a := range m.pendingAttachments {
+			names = append(names, a.Name)
+		}
+		displayContent = fmt.Sprintf("[%s]\n%s", strings.Join(names, ", "), text)
+	}
+
 	// Send chat message
 	m.chat.AddMessage(ChatMsg{
 		Role:      RoleUser,
-		Content:   text,
+		Content:   displayContent,
 		Timestamp: time.Now(),
 	})
 
-	return m, m.sendMessage(text)
+	// Capture and clear pending attachments
+	attachments := m.pendingAttachments
+	m.pendingAttachments = nil
+	m.input.SetAttachmentCount(0)
+
+	return m, m.sendMessage(text, attachments)
 }
 
 func (m Model) handleCommand(cmd *Command) (tea.Model, tea.Cmd) {
@@ -654,8 +672,81 @@ func (m Model) handleCommand(cmd *Command) (tea.Model, tea.Cmd) {
 			Timestamp: time.Now(),
 		})
 
+	case "attach", "image":
+		if cmd.Args == "" {
+			m.chat.AddMessage(ChatMsg{
+				Role:      RoleSystem,
+				Content:   fmt.Sprintf("Usage: /attach <file-path>\nSupported: PNG, JPG, JPEG, GIF, WEBP\nPending attachments: %d", len(m.pendingAttachments)),
+				Timestamp: time.Now(),
+			})
+			return m, nil
+		}
+		att, err := loadAttachment(cmd.Args)
+		if err != nil {
+			m.chat.AddMessage(ChatMsg{
+				Role:      RoleError,
+				Content:   fmt.Sprintf("Failed to attach: %v", err),
+				Timestamp: time.Now(),
+			})
+			return m, nil
+		}
+		m.pendingAttachments = append(m.pendingAttachments, att)
+		m.input.SetAttachmentCount(len(m.pendingAttachments))
+		m.chat.AddMessage(ChatMsg{
+			Role:      RoleSystem,
+			Content:   fmt.Sprintf("Attached %s (%s). Send a message to include it.", att.Name, att.Type),
+			Timestamp: time.Now(),
+		})
+
+	case "unattach", "detach":
+		if len(m.pendingAttachments) == 0 {
+			m.chat.AddMessage(ChatMsg{
+				Role:      RoleSystem,
+				Content:   "No pending attachments to remove.",
+				Timestamp: time.Now(),
+			})
+			return m, nil
+		}
+		if cmd.Args == "" || cmd.Args == "all" {
+			m.pendingAttachments = nil
+			m.input.SetAttachmentCount(0)
+			m.chat.AddMessage(ChatMsg{
+				Role:      RoleSystem,
+				Content:   "All attachments removed.",
+				Timestamp: time.Now(),
+			})
+		} else {
+			// Remove by filename
+			var kept []gateway.Attachment
+			removed := false
+			for _, a := range m.pendingAttachments {
+				if a.Name == cmd.Args && !removed {
+					removed = true
+					continue
+				}
+				kept = append(kept, a)
+			}
+			if !removed {
+				m.chat.AddMessage(ChatMsg{
+					Role:      RoleError,
+					Content:   fmt.Sprintf("No attachment named %q found.", cmd.Args),
+					Timestamp: time.Now(),
+				})
+				return m, nil
+			}
+			m.pendingAttachments = kept
+			m.input.SetAttachmentCount(len(m.pendingAttachments))
+			m.chat.AddMessage(ChatMsg{
+				Role:      RoleSystem,
+				Content:   fmt.Sprintf("Removed %s. %d attachment(s) remaining.", cmd.Args, len(m.pendingAttachments)),
+				Timestamp: time.Now(),
+			})
+		}
+
 	case "new", "reset":
 		m.chat.Clear()
+		m.pendingAttachments = nil
+		m.input.SetAttachmentCount(0)
 		m.chat.AddMessage(ChatMsg{
 			Role:      RoleSystem,
 			Content:   "Session reset. Chat history cleared.",
@@ -868,13 +959,14 @@ func (m Model) tickCmd() tea.Cmd {
 	})
 }
 
-func (m Model) sendMessage(text string) tea.Cmd {
+func (m Model) sendMessage(text string, attachments []gateway.Attachment) tea.Cmd {
 	return func() tea.Msg {
 		params := gateway.ChatSendParams{
 			SessionKey:     m.sessionKey,
 			Message:        text,
 			Thinking:       m.thinking,
 			IdempotencyKey: fmt.Sprintf("%d", time.Now().UnixNano()),
+			Attachments:    attachments,
 		}
 		// Use fire-and-forget — the actual response comes as chat events
 		err := m.gateway.RequestAsync(gateway.MethodChatSend, params)
@@ -961,4 +1053,64 @@ func readDefaultModel() string {
 		return ""
 	}
 	return cfg.Models.Default
+}
+
+// supportedImageExts lists file extensions we accept as image attachments.
+var supportedImageExts = map[string]string{
+	".png":  "image/png",
+	".jpg":  "image/jpeg",
+	".jpeg": "image/jpeg",
+	".gif":  "image/gif",
+	".webp": "image/webp",
+}
+
+// maxAttachmentSize is the maximum file size for an attachment (10 MB).
+const maxAttachmentSize = 10 * 1024 * 1024
+
+// loadAttachment reads a file from disk and returns a base64-encoded Attachment.
+func loadAttachment(path string) (gateway.Attachment, error) {
+	// Expand ~ to home directory
+	if strings.HasPrefix(path, "~/") {
+		home, err := os.UserHomeDir()
+		if err == nil {
+			path = filepath.Join(home, path[2:])
+		}
+	}
+
+	// Resolve to absolute path
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return gateway.Attachment{}, fmt.Errorf("invalid path: %w", err)
+	}
+
+	// Check extension
+	ext := strings.ToLower(filepath.Ext(absPath))
+	mimeType, ok := supportedImageExts[ext]
+	if !ok {
+		// Try mime package as fallback
+		mimeType = mime.TypeByExtension(ext)
+		if mimeType == "" || !strings.HasPrefix(mimeType, "image/") {
+			return gateway.Attachment{}, fmt.Errorf("unsupported file type %q (supported: png, jpg, gif, webp)", ext)
+		}
+	}
+
+	// Read file
+	info, err := os.Stat(absPath)
+	if err != nil {
+		return gateway.Attachment{}, fmt.Errorf("file not found: %w", err)
+	}
+	if info.Size() > maxAttachmentSize {
+		return gateway.Attachment{}, fmt.Errorf("file too large (%d MB, max 10 MB)", info.Size()/(1024*1024))
+	}
+
+	data, err := os.ReadFile(absPath)
+	if err != nil {
+		return gateway.Attachment{}, fmt.Errorf("read file: %w", err)
+	}
+
+	return gateway.Attachment{
+		Type: mimeType,
+		Name: filepath.Base(absPath),
+		Data: base64.StdEncoding.EncodeToString(data),
+	}, nil
 }

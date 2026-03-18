@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"fmt"
+
 	"github.com/charmbracelet/bubbles/textarea"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -8,10 +10,11 @@ import (
 
 // InputModel handles text input for chat messages.
 type InputModel struct {
-	textarea textarea.Model
-	theme    Theme
-	width    int
-	focused  bool
+	textarea        textarea.Model
+	theme           Theme
+	width           int
+	focused         bool
+	attachmentCount int
 }
 
 // NewInputModel creates a new text input.
@@ -86,6 +89,11 @@ func (m *InputModel) Blur() {
 	m.focused = false
 }
 
+// SetAttachmentCount updates the number of pending attachments to display.
+func (m *InputModel) SetAttachmentCount(n int) {
+	m.attachmentCount = n
+}
+
 // Update handles input events.
 func (m InputModel) Update(msg tea.Msg) (InputModel, tea.Cmd) {
 	var cmd tea.Cmd
@@ -101,5 +109,16 @@ func (m InputModel) View() string {
 		Padding(0, 1).
 		Width(m.width - 2)
 
-	return border.Render(m.textarea.View())
+	content := m.textarea.View()
+
+	// Show attachment indicator above the textarea
+	if m.attachmentCount > 0 {
+		badge := lipgloss.NewStyle().
+			Foreground(m.theme.Palette.Accent).
+			Bold(true).
+			Render(fmt.Sprintf(" %d image(s) attached", m.attachmentCount))
+		content = badge + "\n" + content
+	}
+
+	return border.Render(content)
 }

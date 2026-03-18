@@ -506,13 +506,17 @@ func (b *BackgroundModel) SetTheme(theme Theme) {
 }
 
 // SetSize updates the terminal dimensions.
+// For aquarium mode, we preserve the existing entities and just let them adapt to new bounds.
 func (b *BackgroundModel) SetSize(w, h int) {
 	if w == b.width && h == b.height {
 		return
 	}
 	b.width = w
 	b.height = h
-	b.initMode()
+	// Only re-init if not in aquarium mode - aquarium adapts dynamically
+	if b.mode != BgAquarium {
+		b.initMode()
+	}
 }
 
 // IsActive returns true if a background animation is running.

@@ -41,6 +41,8 @@ func CommandHelp(theme Theme) string {
 		{"/think <level>", "Set thinking level (none, adaptive, full)"},
 		{"/theme <name>", "Switch theme (ocean, amber, rose, forest, aquarium)"},
 		{"/bg [mode]", "Cycle/set background (off, starfield, tunnel, plasma, fire, matrix, ocean, cube, skibidi, sigma, npc, ohio, rizz, gyatt, amogus, bussin, aquarium)"},
+		{"/attach <path>", "Attach an image (PNG, JPG, GIF, WEBP)"},
+		{"/unattach [name]", "Remove pending attachment(s)"},
 		{"/new", "Reset/create new session"},
 		{"/clear", "Clear chat history"},
 		{"/exit", "Exit the application"},

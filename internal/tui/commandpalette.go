@@ -30,6 +30,8 @@ var PaletteCommands = []PaletteCommand{
 	{Name: "new", Desc: "Reset session", Shortcut: ""},
 	{Name: "abort", Desc: "Abort active run", Shortcut: "Esc"},
 	{Name: "clear", Desc: "Clear chat history", Shortcut: "Ctrl+L"},
+	{Name: "attach", Desc: "Attach image file", HasArgs: true},
+	{Name: "unattach", Desc: "Remove attachments", HasArgs: true, SubOptions: []string{"all"}},
 	{Name: "feed", Desc: "Drop food in aquarium"},
 	{Name: "exit", Desc: "Exit", Shortcut: "Ctrl+D"},
 }

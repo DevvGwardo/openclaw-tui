@@ -489,12 +489,8 @@ func (b *BackgroundModel) updateAquarium() {
 
 		// Remove if off screen, fully faded, or just split
 		if bub.y < -3 || (bub.splitting && bub.age > 2) || topFade < 0.05 {
-			// Don't replace bubbles that just split - just remove them
-			if bub.splitting && bub.age > 2 {
-				b.aquariumBubbles[i] = aquariumBubble{}
-			} else {
-				b.aquariumBubbles[i] = b.newAquariumBubble(false)
-			}
+			// Mark for removal by setting y off-screen
+			b.aquariumBubbles[i].y = -1000
 			continue
 		}
 
@@ -613,36 +609,33 @@ func (b *BackgroundModel) updateAquarium() {
 	// Add child bubbles from splits
 	b.aquariumBubbles = append(b.aquariumBubbles, newBubbles...)
 
-	// Remove empty slots (bubbles that split and were zeroed out)
-	bubbleCount := 0
-	for i := range b.aquariumBubbles {
-		if b.aquariumBubbles[i].size != 0 || b.aquariumBubbles[i].speed != 0 {
-			b.aquariumBubbles[bubbleCount] = b.aquariumBubbles[i]
-			bubbleCount++
-		}
+	// Hard cap on bubbles - remove oldest if over limit
+	const maxBubbles = 20
+	if len(b.aquariumBubbles) > maxBubbles {
+		// Keep only the most recent maxBubbles
+		b.aquariumBubbles = b.aquariumBubbles[len(b.aquariumBubbles)-maxBubbles:]
 	}
-	b.aquariumBubbles = b.aquariumBubbles[:bubbleCount]
 
 	// Spawn new bubbles (from seaweed bases, fish, and random)
-	spawnRate := 0.015
-	if b.rng.Float64() < spawnRate {
-		nb := b.newAquariumBubble(false)
-		// 30% chance to spawn from a seaweed position
-		if len(b.aquariumWeeds) > 0 && b.rng.Float64() < 0.3 {
-			weed := b.aquariumWeeds[b.rng.Intn(len(b.aquariumWeeds))]
-			nb.x = float64(weed.x) + (b.rng.Float64()-0.5)*2.0
-			nb.y = float64(pH-4-weed.height) + b.rng.Float64()*2.0
-		}
-		// 15% chance to spawn from a fish position (fish exhale)
-		if len(b.aquariumFish) > 0 && b.rng.Float64() < 0.15 {
-			fish := b.aquariumFish[b.rng.Intn(len(b.aquariumFish))]
-			nb.x = fish.x + fish.dir*3.0
-			nb.y = fish.y - 1.0
-			nb.size = 0 // fish bubbles are always tiny
-		}
-		b.aquariumBubbles = append(b.aquariumBubbles, nb)
-		if len(b.aquariumBubbles) > 25 {
-			b.aquariumBubbles = b.aquariumBubbles[1:]
+	// Only spawn if under the limit
+	if len(b.aquariumBubbles) < maxBubbles {
+		spawnRate := 0.01 // 1% chance per tick
+		if b.rng.Float64() < spawnRate {
+			nb := b.newAquariumBubble(false)
+			// 30% chance to spawn from a seaweed position
+			if len(b.aquariumWeeds) > 0 && b.rng.Float64() < 0.3 {
+				weed := b.aquariumWeeds[b.rng.Intn(len(b.aquariumWeeds))]
+				nb.x = float64(weed.x) + (b.rng.Float64()-0.5)*2.0
+				nb.y = float64(pH-4-weed.height) + b.rng.Float64()*2.0
+			}
+			// 15% chance to spawn from a fish position (fish exhale)
+			if len(b.aquariumFish) > 0 && b.rng.Float64() < 0.15 {
+				fish := b.aquariumFish[b.rng.Intn(len(b.aquariumFish))]
+				nb.x = fish.x + fish.dir*3.0
+				nb.y = fish.y - 1.0
+				nb.size = 0 // fish bubbles are always tiny
+			}
+			b.aquariumBubbles = append(b.aquariumBubbles, nb)
 		}
 	}
 }

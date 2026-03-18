@@ -121,12 +121,20 @@ type DeviceInfo struct {
 	Nonce     string `json:"nonce"`
 }
 
+// Attachment is a file (usually an image) sent alongside a chat message.
+type Attachment struct {
+	Type     string `json:"type"`               // MIME type, e.g. "image/png"
+	Name     string `json:"name"`               // original filename
+	Data     string `json:"data"`               // base64-encoded content
+}
+
 // ChatSendParams is sent when the user sends a message.
 type ChatSendParams struct {
-	SessionKey     string `json:"sessionKey"`
-	Message        string `json:"message"`
-	Thinking       string `json:"thinking,omitempty"`
-	IdempotencyKey string `json:"idempotencyKey"`
+	SessionKey     string       `json:"sessionKey"`
+	Message        string       `json:"message"`
+	Thinking       string       `json:"thinking,omitempty"`
+	IdempotencyKey string       `json:"idempotencyKey"`
+	Attachments    []Attachment `json:"attachments,omitempty"`
 }
 
 // ChatAbortParams aborts an active run.
