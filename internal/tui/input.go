@@ -20,7 +20,7 @@ type InputModel struct {
 // NewInputModel creates a new text input.
 func NewInputModel(theme Theme) InputModel {
 	ta := textarea.New()
-	ta.Placeholder = "Type a message... (Enter to send, Shift+Enter for newline)"
+	ta.Placeholder = "Type a message... (Enter to send, Alt+Enter for newline)"
 	ta.Prompt = "" // no prompt character inside the textarea
 	ta.ShowLineNumbers = false
 	ta.CharLimit = 0
@@ -37,7 +37,7 @@ func NewInputModel(theme Theme) InputModel {
 	ta.BlurredStyle.Text = lipgloss.NewStyle().Foreground(theme.Palette.FgMuted)
 	ta.BlurredStyle.Prompt = lipgloss.NewStyle()
 
-	ta.KeyMap.InsertNewline.SetKeys("shift+enter")
+	ta.KeyMap.InsertNewline.SetKeys("alt+enter")
 
 	return InputModel{
 		textarea: ta,

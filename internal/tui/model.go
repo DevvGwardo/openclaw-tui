@@ -549,6 +549,11 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyEnter:
+		// Alt+Enter inserts a newline instead of submitting
+		if msg.Alt {
+			m.input.InsertNewline()
+			return m, nil
+		}
 		// During a bracketed paste, insert a newline instead of submitting
 		if msg.Paste {
 			m.input.InsertNewline()
