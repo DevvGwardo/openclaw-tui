@@ -70,8 +70,7 @@ type Model struct {
 	lastCtrlC          time.Time
 	quitting           bool
 	mouseMode          bool
-	mouseSeq           mouseSeqState // tracks fragmented mouse escape sequences
-	mouseSeqTime       time.Time     // when the current mouse seq started
+	mouseFilter        mouseFilter // suppresses leaked mouse escape sequence fragments
 	pendingAttachments []gateway.Attachment
 	err                error
 }
@@ -117,6 +116,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case tea.MouseMsg:
+		// Record that we received a real mouse event so the filter can
+		// suppress any escape sequence fragments that follow.
+		m.mouseFilter.onMouseEvent()
 		switch msg.Button {
 		case tea.MouseButtonWheelUp:
 			m.chat.ScrollUp(3)
@@ -334,83 +336,122 @@ func (m *Model) layout() {
 	m.chat.SetSize(inner, chatHeight)
 }
 
-// mouseSeqState tracks in-progress mouse escape sequences arriving char-by-char.
+// mouseFilter suppresses mouse escape sequence fragments that leak through
+// Bubble Tea's input parser during scroll wheel events.
+//
 // SGR mouse format: ESC [ < Btn ; X ; Y M/m
-// When the ESC is consumed by bubbletea, the remaining "[<64;66;36M" arrives as
-// individual KeyRunes. We track this state machine to suppress them all.
-type mouseSeqState int
+// When Bubble Tea consumes the ESC but fails to parse the rest, fragments like
+// "[<64;66;36M" arrive as individual KeyRunes. This filter catches them using:
+//  1. Time-based: after a real tea.MouseMsg, suppress mouse-like chars for 200ms
+//  2. Pattern-based: multi-char arrivals matching mouse sequence patterns
+//  3. Bracket tracking: tentatively eat lone '[' and confirm/replay based on next char
+type mouseFilter struct {
+	lastMouseEvent time.Time // when we last saw a real tea.MouseMsg
+	pendingBracket bool      // true if we ate a '[' that might start a mouse seq
+	bracketTime    time.Time // when the pending bracket was received
+}
 
-const (
-	mouseSeqNone    mouseSeqState = iota
-	mouseSeqBracket               // saw "["
-	mouseSeqLT                    // saw "[<"
-	mouseSeqDigits                // saw "[<" + digits/semicolons
-)
+// mouseFilterChars is the set of characters found in SGR mouse escape sequences.
+var mouseFilterChars = func() [256]bool {
+	var t [256]bool
+	for _, c := range []byte("[]<>0123456789;Mm") {
+		t[c] = true
+	}
+	return t
+}()
 
-// mouseSeqTimeout is how long after a "[" we keep suppressing mouse fragments.
-const mouseSeqTimeout = 100 * time.Millisecond
+// isMouseFragment reports whether s consists entirely of mouse-sequence characters.
+func isMouseFragment(s string) bool {
+	for _, r := range s {
+		if r > 255 || !mouseFilterChars[byte(r)] {
+			return false
+		}
+	}
+	return len(s) > 0
+}
+
+// onMouseEvent records that a real mouse event was received from Bubble Tea.
+func (f *mouseFilter) onMouseEvent() {
+	f.lastMouseEvent = time.Now()
+}
+
+// shouldSuppress returns true if msg looks like a mouse escape fragment.
+// If a previously eaten '[' turns out to be real input, it calls replayBracket
+// to re-inject it into the input.
+func (f *mouseFilter) shouldSuppress(msg tea.KeyMsg, replayBracket func()) bool {
+	if msg.Type != tea.KeyRunes {
+		// Non-rune key: if we had a pending bracket, replay it
+		if f.pendingBracket {
+			replayBracket()
+			f.pendingBracket = false
+		}
+		return false
+	}
+
+	s := string(msg.Runes)
+	if len(s) == 0 {
+		return false
+	}
+	now := time.Now()
+
+	// --- Multi-char pattern detection ---
+	// Catches complete or large fragments arriving at once (e.g. "[<64;66;36M")
+	if len(s) > 2 && isMouseFragment(s) {
+		return true
+	}
+	if strings.Contains(s, "[<") || strings.Contains(s, "[M") {
+		return true
+	}
+
+	// --- Time-based suppression ---
+	// Within 200ms of a real mouse event, suppress any mouse-like characters.
+	// This catches the remaining digits/semicolons/M/m that follow a partially
+	// parsed sequence. Nobody types digits/semicolons during a scroll.
+	recentMouse := now.Sub(f.lastMouseEvent) < 200*time.Millisecond
+	if recentMouse && isMouseFragment(s) {
+		return true
+	}
+
+	// --- Bracket tracking ---
+	// Handle pending bracket from a previous call
+	if f.pendingBracket {
+		if now.Sub(f.bracketTime) > 100*time.Millisecond {
+			// Timeout: the '[' was a real keystroke, replay it
+			replayBracket()
+			f.pendingBracket = false
+			// Fall through to process current char normally
+		} else if s == "<" {
+			// Confirmed mouse sequence start: [<
+			// Set lastMouseEvent so the time-based filter catches the rest
+			f.pendingBracket = false
+			f.lastMouseEvent = now
+			return true
+		} else {
+			// Not a mouse sequence, replay the '[' and process current char
+			replayBracket()
+			f.pendingBracket = false
+			// Fall through
+		}
+	}
+
+	// A lone '[' might start a mouse sequence — eat it tentatively.
+	// Only do this when there's no recent mouse event (if recent, the
+	// time-based filter above already handled it).
+	if s == "[" && !recentMouse {
+		f.pendingBracket = true
+		f.bracketTime = now
+		return true
+	}
+
+	return false
+}
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	// Suppress stray mouse escape sequences arriving as individual key runes.
-	// SGR mouse codes like ESC[<64;66;36M arrive char-by-char when bubbletea
-	// doesn't fully parse them. Track state to suppress the entire sequence.
-	if msg.Type == tea.KeyRunes {
-		s := string(msg.Runes)
-		now := time.Now()
-
-		// Reset state if too much time has passed
-		if m.mouseSeq != mouseSeqNone && now.Sub(m.mouseSeqTime) > mouseSeqTimeout {
-			m.mouseSeq = mouseSeqNone
-		}
-
-		// Multi-char arrival (complete or partial sequence)
-		if strings.Contains(s, "[<") || strings.Contains(s, "[M") {
-			m.mouseSeq = mouseSeqNone
-			return m, nil
-		}
-
-		// State machine for char-by-char arrival
-		switch m.mouseSeq {
-		case mouseSeqNone:
-			if s == "[" {
-				m.mouseSeq = mouseSeqBracket
-				m.mouseSeqTime = now
-				return m, nil
-			}
-		case mouseSeqBracket:
-			if s == "<" {
-				m.mouseSeq = mouseSeqLT
-				return m, nil
-			}
-			// Not a mouse sequence — "[" was a real keystroke, replay it
-			m.mouseSeq = mouseSeqNone
-			// Insert the previously-eaten "[" back
-			m.input.InsertRune('[')
-		case mouseSeqLT:
-			m.mouseSeq = mouseSeqDigits
-			return m, nil // suppress digit/semicolons
-		case mouseSeqDigits:
-			// Keep suppressing until we see M/m (end of SGR mouse)
-			if s == "M" || s == "m" {
-				m.mouseSeq = mouseSeqNone
-			}
-			return m, nil
-		}
-
-		// Also catch bare numeric mouse fragments (all digits/semicolons/M/m)
-		allMouse := true
-		for _, r := range s {
-			if r != ';' && r != 'M' && r != 'm' && r != '<' && r != '[' && (r < '0' || r > '9') {
-				allMouse = false
-				break
-			}
-		}
-		if allMouse && len(s) > 2 {
-			return m, nil
-		}
-	} else {
-		// Non-rune key resets mouse sequence state
-		m.mouseSeq = mouseSeqNone
+	// Suppress stray mouse escape sequence fragments.
+	if m.mouseFilter.shouldSuppress(msg, func() {
+		m.input.InsertRune('[')
+	}) {
+		return m, nil
 	}
 
 	// When command palette is active, route keys to it
