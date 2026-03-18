@@ -83,6 +83,7 @@ func NewModel(gw *gateway.Client, sessionKey, thinking, initMessage string, them
 		sessionKey:  sessionKey,
 		thinking:    thinking,
 		initMessage: initMessage,
+		mouseMode:   true,
 		theme:       theme,
 		header:      NewHeaderModel(theme, "", "0.1.0"),
 		chat:        NewChatModel(theme),
@@ -114,15 +115,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case tea.MouseMsg:
-		if m.mouseMode {
-			switch msg.Button {
-			case tea.MouseButtonWheelUp:
-				m.chat.ScrollUp(3)
-				return m, nil
-			case tea.MouseButtonWheelDown:
-				m.chat.ScrollDown(3)
-				return m, nil
-			}
+		switch msg.Button {
+		case tea.MouseButtonWheelUp:
+			m.chat.ScrollUp(3)
+			return m, nil
+		case tea.MouseButtonWheelDown:
+			m.chat.ScrollDown(3)
+			return m, nil
 		}
 		return m, nil
 
@@ -339,14 +338,26 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handlePaletteKey(msg)
 	}
 
-	// Alt+M toggles mouse mode
+	// Alt+Up / Alt+Down for reliable scrolling (Ctrl+Arrow often captured by OS)
+	if msg.Alt {
+		switch msg.Type {
+		case tea.KeyUp:
+			m.chat.ScrollUp(1)
+			return m, nil
+		case tea.KeyDown:
+			m.chat.ScrollDown(1)
+			return m, nil
+		}
+	}
+
+	// Alt+M toggles mouse mode (cell motion for scroll vs full motion)
 	if msg.Type == tea.KeyRunes && msg.Alt && string(msg.Runes) == "m" {
 		m.mouseMode = !m.mouseMode
 		m.statusBar.SetMouseMode(m.mouseMode)
 		if m.mouseMode {
 			return m, tea.EnableMouseAllMotion
 		}
-		return m, tea.DisableMouse
+		return m, tea.EnableMouseCellMotion
 	}
 
 	switch msg.Type {
