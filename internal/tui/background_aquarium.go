@@ -1313,13 +1313,13 @@ func (b *BackgroundModel) CrabSpeechBubbles(termWidth, termHeight int) []speechB
 		// Box dimensions
 		boxW := contentDispW + 2 // +2 for left/right border chars
 
-		// Crab terminal position
+		// Crab terminal column position
 		crabCol := int(crab.x)
-		crabRow := int(crab.y) / 2
 
-		// Position bubble: centered above crab, with tail
-		// Bubble sits well above crab (above the input box area)
-		bubbleTopRow := crabRow - 6
+		// Position bubble above the input box area.
+		// Input box starts ~8 rows from bottom, so place bubble above that.
+		// The bubble is 4 rows tall (top border + content + bottom border + tail).
+		bubbleTopRow := termHeight - 12
 		if bubbleTopRow < 1 {
 			bubbleTopRow = 1
 		}
@@ -1345,10 +1345,10 @@ func (b *BackgroundModel) CrabSpeechBubbles(termWidth, termHeight int) []speechB
 			tailCol = startCol + boxW - 2
 		}
 
-		// ANSI colors: light background, dark text for readability
-		fgDark := "\x1b[38;2;30;40;50m"   // dark text
-		bgLight := "\x1b[48;2;200;220;235m" // light blue-white bg
-		borderFg := "\x1b[38;2;100;180;210m" // cyan-ish border
+		// ANSI colors: dark underwater look — blends with the aquarium
+		fgText := "\x1b[38;2;140;200;220m" // soft cyan text
+		bgDark := "\x1b[48;2;15;30;50m"     // dark ocean blue bg
+		borderFg := "\x1b[38;2;40;90;120m"  // muted teal border
 		reset := "\x1b[0m"
 
 		// Row 0: top border  ╭────────╮
@@ -1356,7 +1356,7 @@ func (b *BackgroundModel) CrabSpeechBubbles(termWidth, termHeight int) []speechB
 		if topInner < 0 {
 			topInner = 0
 		}
-		topLine := borderFg + bgLight + "╭" + repeatRune('─', topInner) + "╮" + reset
+		topLine := borderFg + bgDark + "╭" + repeatRune('─', topInner) + "╮" + reset
 		bubbles = append(bubbles, speechBubbleLine{
 			row: bubbleTopRow, col: startCol, text: topLine,
 		})
@@ -1367,7 +1367,7 @@ func (b *BackgroundModel) CrabSpeechBubbles(termWidth, termHeight int) []speechB
 		if padLen < 0 {
 			padLen = 0
 		}
-		contentLine := borderFg + bgLight + "│" + fgDark + content + repeatRune(' ', padLen) + borderFg + "│" + reset
+		contentLine := borderFg + bgDark + "│" + fgText + content + repeatRune(' ', padLen) + borderFg + "│" + reset
 		bubbles = append(bubbles, speechBubbleLine{
 			row: bubbleTopRow + 1, col: startCol, text: contentLine,
 		})
@@ -1381,13 +1381,13 @@ func (b *BackgroundModel) CrabSpeechBubbles(termWidth, termHeight int) []speechB
 		if afterTail < 0 {
 			afterTail = 0
 		}
-		botLine := borderFg + bgLight + "╰" + repeatRune('─', tailOffset) + "┬" + repeatRune('─', afterTail) + "╯" + reset
+		botLine := borderFg + bgDark + "╰" + repeatRune('─', tailOffset) + "┬" + repeatRune('─', afterTail) + "╯" + reset
 		bubbles = append(bubbles, speechBubbleLine{
 			row: bubbleTopRow + 2, col: startCol, text: botLine,
 		})
 
-		// Row 3: tail connector  ╱ (angled toward crab)
-		tailChar := borderFg + "╱" + reset
+		// Row 3: tail connector  │ (straight down toward crab)
+		tailChar := borderFg + "│" + reset
 		bubbles = append(bubbles, speechBubbleLine{
 			row: bubbleTopRow + 3, col: tailCol, text: tailChar,
 		})

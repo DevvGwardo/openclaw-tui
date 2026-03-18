@@ -77,6 +77,11 @@ func (m *InputModel) InsertNewline() {
 	m.textarea.InsertString("\n")
 }
 
+// InsertRune inserts a single rune at the cursor position.
+func (m *InputModel) InsertRune(r rune) {
+	m.textarea.InsertString(string(r))
+}
+
 // Focus gives focus to the input.
 func (m *InputModel) Focus() {
 	m.textarea.Focus()

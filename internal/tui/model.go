@@ -70,6 +70,8 @@ type Model struct {
 	lastCtrlC          time.Time
 	quitting           bool
 	mouseMode          bool
+	mouseSeq           mouseSeqState // tracks fragmented mouse escape sequences
+	mouseSeqTime       time.Time     // when the current mouse seq started
 	pendingAttachments []gateway.Attachment
 	err                error
 }
@@ -332,37 +334,83 @@ func (m *Model) layout() {
 	m.chat.SetSize(inner, chatHeight)
 }
 
-// looksLikeMouseSeq returns true if a string looks like raw SGR or X10 mouse
-// escape sequence data. These leak into key input when the terminal sends mouse
-// codes that bubbletea doesn't parse (e.g. between mode switches).
-func looksLikeMouseSeq(s string) bool {
-	// SGR format: [<Btn;X;YM or [<Btn;X;Ym
-	if strings.Contains(s, "[<") {
-		return true
-	}
-	// X10 format: [M followed by 3 bytes, or partial fragments
-	if strings.Contains(s, "[M") {
-		return true
-	}
-	// Bare numeric fragments like "64;66;36M" from split sequences
-	for _, r := range s {
-		if r != ';' && r != 'M' && r != 'm' && r != '<' && r != '[' && (r < '0' || r > '9') {
-			return false
-		}
-	}
-	// If it's all digits, semicolons, and M/m it's a mouse fragment
-	return len(s) > 2
-}
+// mouseSeqState tracks in-progress mouse escape sequences arriving char-by-char.
+// SGR mouse format: ESC [ < Btn ; X ; Y M/m
+// When the ESC is consumed by bubbletea, the remaining "[<64;66;36M" arrives as
+// individual KeyRunes. We track this state machine to suppress them all.
+type mouseSeqState int
+
+const (
+	mouseSeqNone    mouseSeqState = iota
+	mouseSeqBracket               // saw "["
+	mouseSeqLT                    // saw "[<"
+	mouseSeqDigits                // saw "[<" + digits/semicolons
+)
+
+// mouseSeqTimeout is how long after a "[" we keep suppressing mouse fragments.
+const mouseSeqTimeout = 100 * time.Millisecond
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	// Discard stray mouse escape sequences that arrive as key input.
-	// When terminals send SGR mouse codes (e.g. [<64;66;36M) and bubbletea
-	// doesn't parse them, they arrive as runes and pollute the textarea.
+	// Suppress stray mouse escape sequences arriving as individual key runes.
+	// SGR mouse codes like ESC[<64;66;36M arrive char-by-char when bubbletea
+	// doesn't fully parse them. Track state to suppress the entire sequence.
 	if msg.Type == tea.KeyRunes {
 		s := string(msg.Runes)
-		if looksLikeMouseSeq(s) {
+		now := time.Now()
+
+		// Reset state if too much time has passed
+		if m.mouseSeq != mouseSeqNone && now.Sub(m.mouseSeqTime) > mouseSeqTimeout {
+			m.mouseSeq = mouseSeqNone
+		}
+
+		// Multi-char arrival (complete or partial sequence)
+		if strings.Contains(s, "[<") || strings.Contains(s, "[M") {
+			m.mouseSeq = mouseSeqNone
 			return m, nil
 		}
+
+		// State machine for char-by-char arrival
+		switch m.mouseSeq {
+		case mouseSeqNone:
+			if s == "[" {
+				m.mouseSeq = mouseSeqBracket
+				m.mouseSeqTime = now
+				return m, nil
+			}
+		case mouseSeqBracket:
+			if s == "<" {
+				m.mouseSeq = mouseSeqLT
+				return m, nil
+			}
+			// Not a mouse sequence — "[" was a real keystroke, replay it
+			m.mouseSeq = mouseSeqNone
+			// Insert the previously-eaten "[" back
+			m.input.InsertRune('[')
+		case mouseSeqLT:
+			m.mouseSeq = mouseSeqDigits
+			return m, nil // suppress digit/semicolons
+		case mouseSeqDigits:
+			// Keep suppressing until we see M/m (end of SGR mouse)
+			if s == "M" || s == "m" {
+				m.mouseSeq = mouseSeqNone
+			}
+			return m, nil
+		}
+
+		// Also catch bare numeric mouse fragments (all digits/semicolons/M/m)
+		allMouse := true
+		for _, r := range s {
+			if r != ';' && r != 'M' && r != 'm' && r != '<' && r != '[' && (r < '0' || r > '9') {
+				allMouse = false
+				break
+			}
+		}
+		if allMouse && len(s) > 2 {
+			return m, nil
+		}
+	} else {
+		// Non-rune key resets mouse sequence state
+		m.mouseSeq = mouseSeqNone
 	}
 
 	// When command palette is active, route keys to it
