@@ -82,28 +82,23 @@ func RenderMessage(msg ChatMsg, theme Theme, width int) string {
 func renderUserMessage(msg ChatMsg, theme Theme, width int) string {
 	p := theme.Palette
 
-	// ── Header row: name + timestamp ──
+	// ── Header: clean, minimal ──
 	name := lipgloss.NewStyle().
 		Foreground(p.Secondary).
 		Bold(true).
-		Background(p.UserBg).
-		Render("  You")
+		Render("You")
 	ts := lipgloss.NewStyle().
 		Foreground(p.FgMuted).
-		Background(p.UserBg).
 		Render(msg.Timestamp.Format("15:04"))
 
-	headerGap := width - lipgloss.Width(name) - lipgloss.Width(ts)
+	headerGap := width - lipgloss.Width(name) - lipgloss.Width(ts) - 4
 	if headerGap < 1 {
 		headerGap = 1
 	}
-	headerFill := lipgloss.NewStyle().
-		Background(p.UserBg).
-		Render(strings.Repeat(" ", headerGap))
-	header := name + headerFill + ts
+	header := name + strings.Repeat(" ", headerGap) + ts
 
-	// ── Content with background ──
-	contentWidth := width - 6 // 3 padding each side
+	// ── Content ──
+	contentWidth := width - 4
 	if contentWidth < 20 {
 		contentWidth = 20
 	}
@@ -112,46 +107,39 @@ func renderUserMessage(msg ChatMsg, theme Theme, width int) string {
 		Width(contentWidth).
 		Render(msg.Content)
 
-	// Wrap content in padded block with background
+	// Wrap in a subtle card with left border accent
 	body := lipgloss.NewStyle().
-		Background(p.UserBg).
-		Padding(0, 3).
-		Width(width).
+		Foreground(p.Fg).
+		Padding(0, 2).
+		BorderLeft(true).
+		BorderStyle(lipgloss.Border{Left: "┃"}).
+		BorderForeground(p.Secondary).
+		Width(width - 2).
 		Render(content)
 
-	// ── Bottom edge: thin accent line ──
-	accent := lipgloss.NewStyle().
-		Foreground(p.Secondary).
-		Render(strings.Repeat("▔", width))
-
-	return "\n" + header + "\n" + body + "\n" + accent + "\n"
+	return "\n" + header + "\n" + body + "\n"
 }
 
 func renderAssistantMessage(msg ChatMsg, theme Theme, width int) string {
 	p := theme.Palette
 
-	// ── Header row: name + timestamp ──
+	// ── Header: clean, minimal ──
 	name := lipgloss.NewStyle().
 		Foreground(p.Primary).
 		Bold(true).
-		Background(p.BgSubtle).
-		Render("  🦞 OpenClaw")
+		Render("🦞 OpenClaw")
 	ts := lipgloss.NewStyle().
 		Foreground(p.FgMuted).
-		Background(p.BgSubtle).
 		Render(msg.Timestamp.Format("15:04"))
 
-	headerGap := width - lipgloss.Width(name) - lipgloss.Width(ts)
+	headerGap := width - lipgloss.Width(name) - lipgloss.Width(ts) - 4
 	if headerGap < 1 {
 		headerGap = 1
 	}
-	headerFill := lipgloss.NewStyle().
-		Background(p.BgSubtle).
-		Render(strings.Repeat(" ", headerGap))
-	header := name + headerFill + ts
+	header := name + strings.Repeat(" ", headerGap) + ts
 
 	// ── Content ──
-	contentWidth := width - 6
+	contentWidth := width - 4
 	if contentWidth < 20 {
 		contentWidth = 20
 	}
@@ -163,8 +151,8 @@ func renderAssistantMessage(msg ChatMsg, theme Theme, width int) string {
 			Width(contentWidth).
 			Render(msg.Content)
 		content += lipgloss.NewStyle().
-			Foreground(p.FgMuted).
-			Render(" ▌")
+			Foreground(p.Primary).
+			Render("▌")
 	} else {
 		content = renderGlamourMarkdown(msg.Content, contentWidth)
 	}
@@ -179,17 +167,15 @@ func renderAssistantMessage(msg ChatMsg, theme Theme, width int) string {
 	}
 
 	body := lipgloss.NewStyle().
-		Background(p.BgSubtle).
-		Padding(0, 3).
-		Width(width).
+		Foreground(p.Fg).
+		Padding(0, 2).
+		BorderLeft(true).
+		BorderStyle(lipgloss.Border{Left: "┃"}).
+		BorderForeground(p.Primary).
+		Width(width - 2).
 		Render(content)
 
-	// ── Bottom edge: thin accent line ──
-	accent := lipgloss.NewStyle().
-		Foreground(p.Primary).
-		Render(strings.Repeat("▔", width))
-
-	return "\n" + header + "\n" + body + "\n" + accent + "\n"
+	return "\n" + header + "\n" + body + "\n"
 }
 
 func renderSystemMessage(msg ChatMsg, theme Theme, width int) string {
@@ -216,28 +202,23 @@ func renderSystemMessage(msg ChatMsg, theme Theme, width int) string {
 func renderErrorMessage(msg ChatMsg, theme Theme, width int) string {
 	p := theme.Palette
 
-	// ── Header row ──
+	// ── Header ──
 	name := lipgloss.NewStyle().
 		Foreground(p.Error).
 		Bold(true).
-		Background(p.BgSubtle).
-		Render("  ✗ Error")
+		Render("✗ Error")
 	ts := lipgloss.NewStyle().
 		Foreground(p.FgMuted).
-		Background(p.BgSubtle).
 		Render(msg.Timestamp.Format("15:04"))
 
-	headerGap := width - lipgloss.Width(name) - lipgloss.Width(ts)
+	headerGap := width - lipgloss.Width(name) - lipgloss.Width(ts) - 4
 	if headerGap < 1 {
 		headerGap = 1
 	}
-	headerFill := lipgloss.NewStyle().
-		Background(p.BgSubtle).
-		Render(strings.Repeat(" ", headerGap))
-	header := name + headerFill + ts
+	header := name + strings.Repeat(" ", headerGap) + ts
 
 	// ── Content ──
-	contentWidth := width - 6
+	contentWidth := width - 4
 	if contentWidth < 20 {
 		contentWidth = 20
 	}
@@ -247,16 +228,15 @@ func renderErrorMessage(msg ChatMsg, theme Theme, width int) string {
 		Render(msg.Content)
 
 	body := lipgloss.NewStyle().
-		Background(p.BgSubtle).
-		Padding(0, 3).
-		Width(width).
+		Foreground(p.Fg).
+		Padding(0, 2).
+		BorderLeft(true).
+		BorderStyle(lipgloss.Border{Left: "┃"}).
+		BorderForeground(p.Error).
+		Width(width - 2).
 		Render(content)
 
-	accent := lipgloss.NewStyle().
-		Foreground(p.Error).
-		Render(strings.Repeat("▔", width))
-
-	return "\n" + header + "\n" + body + "\n" + accent + "\n"
+	return "\n" + header + "\n" + body + "\n"
 }
 
 func renderToolCall(tool ToolCall, theme Theme, width int) string {

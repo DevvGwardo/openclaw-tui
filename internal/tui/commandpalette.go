@@ -202,9 +202,8 @@ func (cp *CommandPaletteModel) View(screenWidth, screenHeight int) string {
 	innerWidth := contentWidth - 2 // account for border
 
 	// Search input line
-	promptStyle := lipgloss.NewStyle().Foreground(p.Primary).Bold(true)
 	filterStyle := lipgloss.NewStyle().Foreground(p.Fg)
-	searchLine := promptStyle.Render("> ") + filterStyle.Render(cp.filter) + filterStyle.Render("█")
+	searchLine := filterStyle.Render(cp.filter) + filterStyle.Render(" █")
 	searchLine = padRight(searchLine, innerWidth)
 
 	// Separator

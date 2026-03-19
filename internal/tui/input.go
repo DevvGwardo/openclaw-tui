@@ -108,20 +108,27 @@ func (m InputModel) Update(msg tea.Msg) (InputModel, tea.Cmd) {
 
 // View renders the input area.
 func (m InputModel) View() string {
+	p := m.theme.Palette
+
+	// Clean, minimal border
 	border := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(m.theme.Palette.Primary).
+		BorderForeground(p.BgSubtle).
+		BorderBackground(p.Bg).
 		Padding(0, 1).
 		Width(m.width - 2)
+
+	if m.focused {
+		border = border.BorderForeground(p.Primary)
+	}
 
 	content := m.textarea.View()
 
 	// Show attachment indicator above the textarea
 	if m.attachmentCount > 0 {
 		badge := lipgloss.NewStyle().
-			Foreground(m.theme.Palette.Accent).
-			Bold(true).
-			Render(fmt.Sprintf(" %d image(s) attached", m.attachmentCount))
+			Foreground(p.Accent).
+			Render(fmt.Sprintf("• %d image(s) attached", m.attachmentCount))
 		content = badge + "\n" + content
 	}
 
