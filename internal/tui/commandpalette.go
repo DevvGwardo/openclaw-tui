@@ -22,7 +22,7 @@ var PaletteCommands = []PaletteCommand{
 	{Name: "help", Desc: "Show help", Shortcut: ""},
 	{Name: "theme", Desc: "Switch theme", HasArgs: true, SubOptions: []string{"ocean", "amber", "rose", "forest", "aquarium"}},
 	{Name: "bg", Desc: "Background animation", HasArgs: true, SubOptions: []string{"off", "starfield", "tunnel", "plasma", "fire", "matrix", "ocean", "cube", "aquarium", "skibidi", "sigma", "npc", "ohio", "rizz", "gyatt", "amogus", "bussin"}},
-	{Name: "model", Desc: "Switch model", Shortcut: ""},
+	{Name: "model", Desc: "Switch model", HasArgs: true, SubOptions: []string{"kimi-coding/k2p5", "minimax/MiniMax-M2.7", "kimi", "minimax"}},
 	{Name: "session", Desc: "Switch session", HasArgs: true},
 	{Name: "agent", Desc: "Switch agent", Shortcut: ""},
 	{Name: "think", Desc: "Thinking level", HasArgs: true, SubOptions: []string{"none", "adaptive", "full"}},
