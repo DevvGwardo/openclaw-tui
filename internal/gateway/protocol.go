@@ -226,10 +226,8 @@ type StatusPayload struct {
 
 // SessionsPatchParams is sent to update session properties like model.
 type SessionsPatchParams struct {
-	SessionKey string `json:"sessionKey"`
-	Patch      struct {
-		Model string `json:"model,omitempty"`
-	} `json:"patch"`
+	Key   string `json:"key"`
+	Model string `json:"model,omitempty"`
 }
 
 // AgentEvent is the payload of an agent stream event.

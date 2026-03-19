@@ -1197,9 +1197,9 @@ func (m Model) fetchModelInfo() tea.Cmd {
 func (m Model) setModel(modelName string) tea.Cmd {
 	return func() tea.Msg {
 		params := gateway.SessionsPatchParams{
-			SessionKey: m.sessionKey,
+			Key:   m.sessionKey,
+			Model: modelName,
 		}
-		params.Patch.Model = modelName
 		
 		resp, err := m.gateway.Request(gateway.MethodSessionsPatch, params)
 		if err != nil {
