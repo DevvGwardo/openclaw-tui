@@ -1033,6 +1033,41 @@ func (m Model) handleCommand(cmd *Command) (tea.Model, tea.Cmd) {
 			Timestamp: time.Now(),
 		})
 
+	case "search", "find":
+		if cmd.Args == "" {
+			m.chat.AddMessage(ChatMsg{
+				Role:      RoleSystem,
+				Content:   "Usage: /search <query> - Search through chat history",
+				Timestamp: time.Now(),
+			})
+			return m, nil
+		}
+		results := m.searchChat(cmd.Args)
+		if len(results) == 0 {
+			m.chat.AddMessage(ChatMsg{
+				Role:      RoleSystem,
+				Content:   fmt.Sprintf("No messages found matching %q", cmd.Args),
+				Timestamp: time.Now(),
+			})
+		} else {
+			m.chat.AddMessage(ChatMsg{
+				Role:      RoleSystem,
+				Content:   fmt.Sprintf("Found %d message(s) matching %q:", len(results), cmd.Args),
+				Timestamp: time.Now(),
+			})
+			for _, r := range results {
+				m.chat.AddMessage(r)
+			}
+		}
+
+	case "stats":
+		stats := m.getChatStats()
+		m.chat.AddMessage(ChatMsg{
+			Role:      RoleSystem,
+			Content:   stats,
+			Timestamp: time.Now(),
+		})
+
 	default:
 		m.chat.AddMessage(ChatMsg{
 			Role:      RoleError,
@@ -1594,4 +1629,59 @@ func loadAttachment(path string) (gateway.Attachment, error) {
 		Name: filepath.Base(absPath),
 		Data: base64.StdEncoding.EncodeToString(data),
 	}, nil
+}
+
+// searchChat searches through chat history for messages containing the query.
+func (m *Model) searchChat(query string) []ChatMsg {
+	var results []ChatMsg
+	queryLower := strings.ToLower(query)
+
+	messages := m.chat.GetMessages()
+	for _, msg := range messages {
+		if strings.Contains(strings.ToLower(msg.Content), queryLower) {
+			results = append(results, msg)
+		}
+	}
+
+	return results
+}
+
+// getChatStats returns statistics about the current chat session.
+func (m *Model) getChatStats() string {
+	var userCount, assistantCount, systemCount int
+	var totalChars int
+
+	messages := m.chat.GetMessages()
+	for _, msg := range messages {
+		switch msg.Role {
+		case RoleUser:
+			userCount++
+			totalChars += len(msg.Content)
+		case RoleAssistant:
+			assistantCount++
+			totalChars += len(msg.Content)
+		case RoleSystem:
+			systemCount++
+		}
+	}
+
+	return fmt.Sprintf(`Chat Statistics
+───────────────
+Total Messages: %d
+  User: %d
+  Assistant: %d
+  System: %d
+Total Characters: %d
+Session: %s
+Model: %s
+Theme: %s`,
+		len(messages),
+		userCount,
+		assistantCount,
+		systemCount,
+		totalChars,
+		m.sessionKey,
+		m.statusBar.Model(),
+		m.theme.Name,
+	)
 }

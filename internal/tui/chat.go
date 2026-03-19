@@ -109,6 +109,13 @@ func (c *ChatModel) MessageCount() int {
 	return len(c.messages)
 }
 
+// GetMessages returns a copy of all messages.
+func (c ChatModel) GetMessages() []ChatMsg {
+	result := make([]ChatMsg, len(c.messages))
+	copy(result, c.messages)
+	return result
+}
+
 // Height returns the viewport height.
 func (c ChatModel) Height() int {
 	return c.viewport.Height
