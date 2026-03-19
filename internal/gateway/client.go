@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"os"
 	"runtime"
 	"sync"
 	"time"
@@ -323,13 +324,24 @@ func (c *Client) handleEvent(frame Frame) {
 	case EventChat:
 		var chat ChatEvent
 		if err := json.Unmarshal(frame.Payload, &chat); err == nil {
-			c.emit(GatewayEvent{Type: "chat", Chat: &chat})
+			c.emit(GatewayEvent{Type: "chat", Chat: &chat, Payload: frame.Payload})
+		} else {
+			// Log unmarshal errors
+			if df, _ := os.OpenFile("/tmp/openclaw-tui-debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); df != nil {
+				fmt.Fprintf(df, "[PARSE_ERR] chat unmarshal: %v payload=%s\n", err, string(frame.Payload))
+				df.Close()
+			}
 		}
 
 	case EventAgent:
 		var agent AgentEvent
 		if err := json.Unmarshal(frame.Payload, &agent); err == nil {
-			c.emit(GatewayEvent{Type: "agent", Agent: &agent})
+			c.emit(GatewayEvent{Type: "agent", Agent: &agent, Payload: frame.Payload})
+		} else {
+			if df, _ := os.OpenFile("/tmp/openclaw-tui-debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); df != nil {
+				fmt.Fprintf(df, "[PARSE_ERR] agent unmarshal: %v payload=%s\n", err, string(frame.Payload))
+				df.Close()
+			}
 		}
 
 	case EventSessionUpdate:

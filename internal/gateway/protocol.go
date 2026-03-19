@@ -153,9 +153,57 @@ type ChatEvent struct {
 }
 
 // ChatMessage is a message within a chat event.
+// Content may arrive as a plain string or as an array of content blocks
+// (e.g. [{type:"thinking",thinking:"..."},{type:"text",text:"..."}]).
 type ChatMessage struct {
 	Role    string `json:"role"`
-	Content string `json:"content"`
+	Content string
+}
+
+// UnmarshalJSON handles content as either a string or an array of blocks.
+func (m *ChatMessage) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		Role    string          `json:"role"`
+		Content json.RawMessage `json:"content"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	m.Role = raw.Role
+	m.Content = extractTextFromContent(raw.Content)
+	return nil
+}
+
+// ContentBlock represents a single block in an anthropic-messages content array.
+type ContentBlock struct {
+	Type     string `json:"type"`
+	Text     string `json:"text,omitempty"`
+	Thinking string `json:"thinking,omitempty"`
+}
+
+// extractTextFromContent handles both string and array content formats.
+func extractTextFromContent(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	// Try as a plain string first.
+	var s string
+	if err := json.Unmarshal(raw, &s); err == nil {
+		return s
+	}
+	// Try as an array of content blocks.
+	var blocks []ContentBlock
+	if err := json.Unmarshal(raw, &blocks); err == nil {
+		var text string
+		for _, b := range blocks {
+			if b.Type == "text" && b.Text != "" {
+				text += b.Text
+			}
+		}
+		return text
+	}
+	// Fallback: return raw string.
+	return string(raw)
 }
 
 // TickPayload is the payload of a tick event.
@@ -174,6 +222,14 @@ type SessionInfo struct {
 type StatusPayload struct {
 	Sessions []SessionInfo `json:"sessions,omitempty"`
 	Version  string        `json:"version,omitempty"`
+}
+
+// SessionsPatchParams is sent to update session properties like model.
+type SessionsPatchParams struct {
+	SessionKey string `json:"sessionKey"`
+	Patch      struct {
+		Model string `json:"model,omitempty"`
+	} `json:"patch"`
 }
 
 // AgentEvent is the payload of an agent stream event.

@@ -45,6 +45,11 @@ func (s *StatusBarModel) SetModel(model string) {
 	s.model = model
 }
 
+// Model returns the current model name.
+func (s StatusBarModel) Model() string {
+	return s.model
+}
+
 // SetTokens updates token count.
 func (s *StatusBarModel) SetTokens(current, max int) {
 	s.tokens = current

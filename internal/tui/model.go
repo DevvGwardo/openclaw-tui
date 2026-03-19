@@ -768,11 +768,15 @@ func (m Model) handleCommand(cmd *Command) (tea.Model, tea.Cmd) {
 		return m, m.requestStatus()
 
 	case "model":
-		m.chat.AddMessage(ChatMsg{
-			Role:      RoleSystem,
-			Content:   "Model switching: use /model <name> (requires gateway support).",
-			Timestamp: time.Now(),
-		})
+		if cmd.Args == "" {
+			m.chat.AddMessage(ChatMsg{
+				Role:      RoleSystem,
+				Content:   fmt.Sprintf("Current model: %s\nUsage: /model <name>", m.statusBar.Model()),
+				Timestamp: time.Now(),
+			})
+			return m, nil
+		}
+		return m, m.setModel(cmd.Args)
 
 	case "session":
 		if cmd.Args != "" {
@@ -905,6 +909,27 @@ func (m Model) handleCommand(cmd *Command) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleGatewayEvent(evt gateway.GatewayEvent) (tea.Model, tea.Cmd) {
+	// Debug: log all gateway events to file
+	if df, err := os.OpenFile("/tmp/openclaw-tui-debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); err == nil {
+		fmt.Fprintf(df, "[%s] event type=%q", time.Now().Format("15:04:05"), evt.Type)
+		if evt.Chat != nil {
+			fmt.Fprintf(df, " chat.state=%q msg_nil=%v", evt.Chat.State, evt.Chat.Message == nil)
+			if evt.Chat.Message != nil {
+				fmt.Fprintf(df, " role=%q content_len=%d content=%q", evt.Chat.Message.Role, len(evt.Chat.Message.Content), evt.Chat.Message.Content)
+			}
+		}
+		if evt.Agent != nil {
+			fmt.Fprintf(df, " agent.stream=%q data=%s", evt.Agent.Stream, string(evt.Agent.Data))
+		}
+		if evt.Payload != nil {
+			if evt.Type == "chat" || evt.Type == "agent" {
+				fmt.Fprintf(df, " raw_payload=%s", string(evt.Payload))
+			}
+		}
+		fmt.Fprintln(df)
+		df.Close()
+	}
+
 	switch evt.Type {
 	case "connected":
 		m.connected = true
@@ -1166,6 +1191,32 @@ func (m Model) fetchModelInfo() tea.Cmd {
 			}
 		}
 		return ModelInfoMsg{}
+	}
+}
+
+func (m Model) setModel(modelName string) tea.Cmd {
+	return func() tea.Msg {
+		params := gateway.SessionsPatchParams{
+			SessionKey: m.sessionKey,
+		}
+		params.Patch.Model = modelName
+		
+		resp, err := m.gateway.Request(gateway.MethodSessionsPatch, params)
+		if err != nil {
+			return StatusResultMsg{Err: fmt.Errorf("set model: %w", err)}
+		}
+		
+		if !resp.OK {
+			errMsg := "failed to set model"
+			if resp.Error != nil {
+				errMsg = resp.Error.Message
+			}
+			return StatusResultMsg{Err: fmt.Errorf("set model: %s", errMsg)}
+		}
+		
+		// Update local display
+		m.statusBar.SetModel(modelName)
+		return StatusResultMsg{Content: fmt.Sprintf("Model switched to %s.", modelName)}
 	}
 }
 
