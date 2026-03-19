@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/DevvGwardo/openclaw-tui/internal/clipboard"
+	"github.com/DevvGwardo/openclaw-tui/internal/config"
 	"github.com/DevvGwardo/openclaw-tui/internal/gateway"
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -39,6 +41,24 @@ type (
 	// ModelInfoMsg carries the model name from a silent status fetch.
 	ModelInfoMsg struct {
 		Model string
+	}
+
+	// ReconnectingMsg signals that we're trying to reconnect.
+	ReconnectingMsg struct {
+		Attempt int
+		Delay   time.Duration
+	}
+
+	// AgentsListMsg carries the list of available agents.
+	AgentsListMsg struct {
+		Agents []gateway.AgentInfo
+		Err    error
+	}
+
+	// TokenCountMsg carries token usage information.
+	TokenCountMsg struct {
+		Used  int
+		Total int
 	}
 )
 
@@ -74,26 +94,44 @@ type Model struct {
 	mouseFilter        mouseFilter // suppresses leaked mouse escape sequence fragments
 	pendingAttachments []gateway.Attachment
 	err                error
+
+	// New: config and persistent state
+	cfg           config.Config
+	historyIndex  int // for navigating history with up/down
+	reconnecting  bool
+	reconnectAttempt int
 }
 
 // NewModel creates the main TUI model.
-func NewModel(gw *gateway.Client, sessionKey, thinking, initMessage string, themeName ThemeName) Model {
+func NewModel(gw *gateway.Client, sessionKey, thinking, initMessage string, themeName ThemeName, cfg config.Config) Model {
 	theme := NewTheme(themeName)
 
+	// Apply config defaults if CLI args not provided
+	if sessionKey == "agent:main:main" && cfg.Session != "" {
+		sessionKey = cfg.Session
+	}
+	if thinking == "adaptive" && cfg.Thinking != "" {
+		thinking = cfg.Thinking
+	}
+
 	return Model{
-		gateway:     gw,
-		sessionKey:  sessionKey,
-		thinking:    thinking,
-		initMessage: initMessage,
-		mouseMode:   true,
-		theme:       theme,
-		header:      NewHeaderModel(theme, "", "0.1.0"),
-		chat:        NewChatModel(theme),
-		input:       NewInputModel(theme),
-		statusBar:   NewStatusBarModel(theme),
-		activityBar: NewActivityBarModel(theme),
-		background:     NewBackgroundModel(theme),
-		commandPalette: NewCommandPaletteModel(theme),
+		gateway:          gw,
+		sessionKey:       sessionKey,
+		thinking:         thinking,
+		initMessage:      initMessage,
+		mouseMode:        true,
+		theme:            theme,
+		cfg:              cfg,
+		historyIndex:     -1,
+		reconnecting:     false,
+		reconnectAttempt: 0,
+		header:           NewHeaderModel(theme, "", "0.1.0"),
+		chat:             NewChatModel(theme),
+		input:            NewInputModel(theme),
+		statusBar:        NewStatusBarModel(theme),
+		activityBar:      NewActivityBarModel(theme),
+		background:       NewBackgroundModel(theme),
+		commandPalette:   NewCommandPaletteModel(theme),
 	}
 }
 
@@ -156,6 +194,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case ConnectedMsg:
 		m.connected = true
+		m.reconnecting = false
+		m.reconnectAttempt = 0
 		m.header.SetConnected(true)
 		m.statusBar.SetConnected(true)
 		m.chat.AddMessage(ChatMsg{
@@ -166,14 +206,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		var cmds []tea.Cmd
 		cmds = append(cmds, m.fetchModelInfo())
+		cmds = append(cmds, m.fetchAgentsList()) // New: fetch agents list
 
 		// Send initial message if provided
 		if m.initMessage != "" {
 			msg := m.initMessage
-			m.initMessage = ""
+			m.initMessage = ""  
 			cmds = append(cmds, m.sendMessage(msg, nil))
 		}
 		return m, tea.Batch(cmds...)
+
+	case ReconnectingMsg:
+		m.reconnecting = true
+		m.reconnectAttempt = msg.Attempt
+		m.chat.AddMessage(ChatMsg{
+			Role:      RoleSystem,
+			Content:   fmt.Sprintf("⚠️ Connection lost. Reconnecting in %v (attempt %d)...", msg.Delay, msg.Attempt),
+			Timestamp: time.Now(),
+		})
+		return m, nil
 
 	case SendResultMsg:
 		if msg.Err != nil {
@@ -196,6 +247,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.statusBar.SetModel("connected")
 			}
 		}
+		return m, nil
+
+	case AgentsListMsg:
+		if msg.Err == nil {
+			// Store agents in command palette for /agent command
+			agentNames := make([]string, 0, len(msg.Agents))
+			for _, a := range msg.Agents {
+				agentNames = append(agentNames, a.ID)
+			}
+			m.commandPalette.SetAgentOptions(agentNames)
+		}
+		return m, nil
+
+	case TokenCountMsg:
+		m.statusBar.SetTokens(msg.Used, msg.Total)
 		return m, nil
 
 	case StatusResultMsg:
@@ -472,6 +538,34 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
+	// Up/Down for history navigation (when input is empty or at start)
+	if msg.Type == tea.KeyUp {
+		if m.input.Value() == "" || m.historyIndex >= 0 {
+			history := m.cfg.GetHistory("", 100)
+			if m.historyIndex < len(history)-1 {
+				m.historyIndex++
+				m.input.Reset()
+				m.input.InsertString(history[m.historyIndex])
+			}
+			return m, nil
+		}
+	}
+	if msg.Type == tea.KeyDown {
+		if m.historyIndex >= 0 {
+			m.historyIndex--
+			history := m.cfg.GetHistory("", 100)
+			if m.historyIndex >= 0 {
+				m.input.Reset()
+				m.input.InsertString(history[m.historyIndex])
+			} else {
+				m.input.Reset()
+			}
+		}
+		return m, nil
+	}
+	// Reset history index on any other key
+	m.historyIndex = -1
+
 	// Alt+M toggles mouse mode: cell motion (scroll) ↔ all motion (full tracking).
 	// Mouse is never fully disabled to avoid raw escape sequences leaking into
 	// the textarea. To select text for copy, hold Shift while clicking/dragging
@@ -650,6 +744,9 @@ func (m Model) handleSubmit() (tea.Model, tea.Cmd) {
 
 	m.input.Reset()
 
+	// Add to history (even commands)
+	m.cfg.AddHistory(text)
+
 	// Check for slash commands
 	if cmd := ParseCommand(text); cmd != nil {
 		return m.handleCommand(cmd)
@@ -690,6 +787,11 @@ func (m Model) handleCommand(cmd *Command) (tea.Model, tea.Cmd) {
 		})
 
 	case "exit", "quit":
+		// Save config before exiting
+		m.cfg.Theme = string(m.theme.Name)
+		m.cfg.Session = m.sessionKey
+		m.cfg.Thinking = m.thinking
+		m.cfg.Save()
 		m.quitting = true
 		return m, tea.Quit
 
@@ -709,6 +811,8 @@ func (m Model) handleCommand(cmd *Command) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.setTheme(name)
+		m.cfg.Theme = cmd.Args
+		m.cfg.Save()
 		m.chat.AddMessage(ChatMsg{
 			Role:      RoleSystem,
 			Content:   fmt.Sprintf("Theme switched to %s.", cmd.Args),
@@ -718,6 +822,8 @@ func (m Model) handleCommand(cmd *Command) (tea.Model, tea.Cmd) {
 	case "bg":
 		if cmd.Args == "" {
 			mode := m.background.CycleMode()
+			m.cfg.Background = string(mode)
+			m.cfg.Save()
 			m.chat.AddMessage(ChatMsg{
 				Role:      RoleSystem,
 				Content:   fmt.Sprintf("Background: %s", mode),
@@ -741,6 +847,8 @@ func (m Model) handleCommand(cmd *Command) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			m.background.SetMode(mode)
+			m.cfg.Background = cmd.Args
+			m.cfg.Save()
 			m.chat.AddMessage(ChatMsg{
 				Role:      RoleSystem,
 				Content:   fmt.Sprintf("Background: %s", mode),
@@ -758,6 +866,8 @@ func (m Model) handleCommand(cmd *Command) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.thinking = cmd.Args
+		m.cfg.Thinking = cmd.Args
+		m.cfg.Save()
 		m.statusBar.SetThinking(m.thinking)
 		m.chat.AddMessage(ChatMsg{
 			Role:      RoleSystem,
@@ -782,6 +892,8 @@ func (m Model) handleCommand(cmd *Command) (tea.Model, tea.Cmd) {
 	case "session":
 		if cmd.Args != "" {
 			m.sessionKey = cmd.Args
+			m.cfg.Session = cmd.Args
+			m.cfg.Save()
 			m.statusBar.SetSession(m.sessionKey)
 			m.chat.AddMessage(ChatMsg{
 				Role:      RoleSystem,
@@ -795,6 +907,12 @@ func (m Model) handleCommand(cmd *Command) (tea.Model, tea.Cmd) {
 				Timestamp: time.Now(),
 			})
 		}
+
+	case "agent":
+		if cmd.Args == "" {
+			return m, m.fetchAgentsList()
+		}
+		return m, m.setAgent(cmd.Args)
 
 	case "abort":
 		if m.streaming {
@@ -898,6 +1016,23 @@ func (m Model) handleCommand(cmd *Command) (tea.Model, tea.Cmd) {
 			Timestamp: time.Now(),
 		})
 
+	case "save":
+		filename := cmd.Args
+		if filename == "" {
+			filename = fmt.Sprintf("openclaw-chat-%s.md", time.Now().Format("2006-01-02-150405"))
+		}
+		return m, m.saveChat(filename)
+
+	case "copy":
+		return m, m.copyLastMessage(cmd.Args)
+
+	case "keys", "shortcuts":
+		m.chat.AddMessage(ChatMsg{
+			Role:      RoleSystem,
+			Content:   CommandHelp(m.theme),
+			Timestamp: time.Now(),
+		})
+
 	default:
 		m.chat.AddMessage(ChatMsg{
 			Role:      RoleError,
@@ -934,6 +1069,8 @@ func (m Model) handleGatewayEvent(evt gateway.GatewayEvent) (tea.Model, tea.Cmd)
 	switch evt.Type {
 	case "connected":
 		m.connected = true
+		m.reconnecting = false
+		m.reconnectAttempt = 0
 		m.header.SetConnected(true)
 		m.statusBar.SetConnected(true)
 
@@ -977,6 +1114,10 @@ func (m Model) handleGatewayEvent(evt gateway.GatewayEvent) (tea.Model, tea.Cmd)
 			json.Unmarshal(evt.Payload, &info)
 			if info.Model != "" {
 				m.statusBar.SetModel(info.Model)
+			}
+			// Update token count if available
+			if info.TokenUsage != nil {
+				m.statusBar.SetTokens(info.TokenUsage.Used, info.TokenUsage.Total)
 			}
 		}
 
@@ -1209,6 +1350,20 @@ func (m Model) fetchModelInfo() tea.Cmd {
 	}
 }
 
+func (m Model) fetchAgentsList() tea.Cmd {
+	return func() tea.Msg {
+		resp, err := m.gateway.Request(gateway.MethodStatus, nil)
+		if err != nil {
+			return AgentsListMsg{Err: err}
+		}
+		var status gateway.StatusPayload
+		if resp.Payload != nil {
+			json.Unmarshal(resp.Payload, &status)
+		}
+		return AgentsListMsg{Agents: status.Agents}
+	}
+}
+
 func (m Model) setModel(modelName string) tea.Cmd {
 	return func() tea.Msg {
 		params := gateway.SessionsPatchParams{
@@ -1232,6 +1387,126 @@ func (m Model) setModel(modelName string) tea.Cmd {
 		// Update local display
 		m.statusBar.SetModel(modelName)
 		return StatusResultMsg{Content: fmt.Sprintf("Model switched to %s.", modelName)}
+	}
+}
+
+func (m Model) setAgent(agentID string) tea.Cmd {
+	return func() tea.Msg {
+		params := gateway.SessionsPatchParams{
+			Key:     m.sessionKey,
+			AgentID: agentID,
+		}
+		
+		resp, err := m.gateway.Request(gateway.MethodSessionsPatch, params)
+		if err != nil {
+			return StatusResultMsg{Err: fmt.Errorf("set agent: %w", err)}
+		}
+		
+		if !resp.OK {
+			errMsg := "failed to set agent"
+			if resp.Error != nil {
+				errMsg = resp.Error.Message
+			}
+			return StatusResultMsg{Err: fmt.Errorf("set agent: %s", errMsg)}
+		}
+		
+		return StatusResultMsg{Content: fmt.Sprintf("Agent switched to %s.", agentID)}
+	}
+}
+
+func (m Model) saveChat(filename string) tea.Cmd {
+	return func() tea.Msg {
+		// Expand ~ to home directory
+		if strings.HasPrefix(filename, "~/") {
+			home, err := os.UserHomeDir()
+			if err == nil {
+				filename = filepath.Join(home, filename[2:])
+			}
+		}
+
+		// Default to home directory if not absolute
+		if !filepath.IsAbs(filename) {
+			home, err := os.UserHomeDir()
+			if err == nil {
+				filename = filepath.Join(home, filename)
+			}
+		}
+
+		// Build markdown content
+		var sb strings.Builder
+		sb.WriteString(fmt.Sprintf("# OpenClaw Chat Log\n\n"))
+		sb.WriteString(fmt.Sprintf("**Session:** %s\n", m.sessionKey))
+		sb.WriteString(fmt.Sprintf("**Date:** %s\n\n", time.Now().Format("2006-01-02 15:04:05")))
+		sb.WriteString("---\n\n")
+
+		for _, msg := range m.chat.messages {
+			switch msg.Role {
+			case RoleUser:
+				sb.WriteString(fmt.Sprintf("## You (%s)\n\n%s\n\n", msg.Timestamp.Format("15:04"), msg.Content))
+			case RoleAssistant:
+				sb.WriteString(fmt.Sprintf("## Assistant (%s)\n\n%s\n\n", msg.Timestamp.Format("15:04"), msg.Content))
+			case RoleSystem:
+				sb.WriteString(fmt.Sprintf("*System: %s*\n\n", msg.Content))
+			case RoleError:
+				sb.WriteString(fmt.Sprintf("**Error: %s**\n\n", msg.Content))
+			}
+		}
+
+		err := os.WriteFile(filename, []byte(sb.String()), 0644)
+		if err != nil {
+			return StatusResultMsg{Err: fmt.Errorf("save chat: %w", err)}
+		}
+
+		return StatusResultMsg{Content: fmt.Sprintf("Chat saved to %s", filename)}
+	}
+}
+
+func (m Model) copyLastMessage(target string) tea.Cmd {
+	return func() tea.Msg {
+		var content string
+		var found bool
+
+		// Find the last message based on target
+		switch target {
+		case "user", "you", "me":
+			for i := len(m.chat.messages) - 1; i >= 0; i-- {
+				if m.chat.messages[i].Role == RoleUser {
+					content = m.chat.messages[i].Content
+					found = true
+					break
+				}
+			}
+		case "assistant", "ai", "claw", "":
+			for i := len(m.chat.messages) - 1; i >= 0; i-- {
+				if m.chat.messages[i].Role == RoleAssistant {
+					content = m.chat.messages[i].Content
+					found = true
+					break
+				}
+			}
+		case "system":
+			for i := len(m.chat.messages) - 1; i >= 0; i-- {
+				if m.chat.messages[i].Role == RoleSystem {
+					content = m.chat.messages[i].Content
+					found = true
+					break
+				}
+			}
+		default:
+			return StatusResultMsg{Err: fmt.Errorf("unknown target: %s (use 'user', 'assistant', or 'system')", target)}
+		}
+
+		if !found {
+			return StatusResultMsg{Err: fmt.Errorf("no %s message found", target)}
+		}
+
+		// Try system clipboard first, fall back to OSC 52
+		if err := clipboard.Copy(content); err != nil {
+			// OSC 52 fallback - print escape sequence
+			return StatusResultMsg{Content: clipboard.CopyWithOSC52(content)}
+		}
+
+		return StatusResultMsg{Content: "Copied to clipboard!"}
 	}
 }
 

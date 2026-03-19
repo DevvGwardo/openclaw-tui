@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/DevvGwardo/openclaw-tui/internal/config"
 	"github.com/DevvGwardo/openclaw-tui/internal/gateway"
 	"github.com/DevvGwardo/openclaw-tui/internal/tui"
 	tea "github.com/charmbracelet/bubbletea"
@@ -89,8 +90,22 @@ func main() {
 	}
 	defer gw.Close()
 
+	// Load user config
+	cfg, _ := config.Load()
+
+	// Apply CLI overrides to config
+	if theme != "" {
+		cfg.Theme = theme
+	}
+	if session != "agent:main:main" {
+		cfg.Session = session
+	}
+	if thinking != "adaptive" {
+		cfg.Thinking = thinking
+	}
+
 	// Create TUI model
-	model := tui.NewModel(gw, session, thinking, message, tui.ThemeName(theme))
+	model := tui.NewModel(gw, session, thinking, message, tui.ThemeName(cfg.Theme), cfg)
 	model.SetURL(url)
 
 	// Run Bubble Tea

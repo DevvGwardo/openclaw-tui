@@ -213,21 +213,38 @@ type TickPayload struct {
 
 // SessionInfo represents a session from sessions.list.
 type SessionInfo struct {
-	Key   string `json:"key"`
-	Model string `json:"model,omitempty"`
-	Agent string `json:"agent,omitempty"`
+	Key        string      `json:"key"`
+	Model      string      `json:"model,omitempty"`
+	Agent      string      `json:"agent,omitempty"`
+	TokenUsage *TokenUsage `json:"tokenUsage,omitempty"`
+}
+
+// AgentInfo represents an available agent.
+type AgentInfo struct {
+	ID          string `json:"id"`
+	Name        string `json:"name,omitempty"`
+	Description string `json:"description,omitempty"`
+}
+
+// TokenUsage represents token consumption information.
+type TokenUsage struct {
+	Used  int `json:"used"`
+	Total int `json:"total"`
 }
 
 // StatusPayload is the response to a status request.
 type StatusPayload struct {
-	Sessions []SessionInfo `json:"sessions,omitempty"`
-	Version  string        `json:"version,omitempty"`
+	Sessions  []SessionInfo `json:"sessions,omitempty"`
+	Agents    []AgentInfo   `json:"agents,omitempty"`
+	Version   string        `json:"version,omitempty"`
+	TokenUsage *TokenUsage  `json:"tokenUsage,omitempty"`
 }
 
-// SessionsPatchParams is sent to update session properties like model.
+// SessionsPatchParams is sent to update session properties like model or agent.
 type SessionsPatchParams struct {
-	Key   string `json:"key"`
-	Model string `json:"model,omitempty"`
+	Key     string `json:"key"`
+	Model   string `json:"model,omitempty"`
+	AgentID string `json:"agentId,omitempty"`
 }
 
 // AgentEvent is the payload of an agent stream event.

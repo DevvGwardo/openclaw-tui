@@ -49,6 +49,9 @@ type CommandPaletteModel struct {
 	subItems   []string
 	subSel     int
 	parentCmd  string
+
+	// Dynamic options populated at runtime
+	agentOptions []string
 }
 
 // NewCommandPaletteModel creates a new command palette.
@@ -68,6 +71,11 @@ func (cp *CommandPaletteModel) Open(filter string) {
 	cp.active = true
 	cp.subActive = false
 	cp.SetFilter(filter)
+}
+
+// SetAgentOptions updates the available agents for the /agent command.
+func (cp *CommandPaletteModel) SetAgentOptions(agents []string) {
+	cp.agentOptions = agents
 }
 
 // Close hides the palette.
@@ -130,6 +138,14 @@ func (cp *CommandPaletteModel) Selected() string {
 		return ""
 	}
 	cmd := cp.filtered[cp.selected]
+	// Use dynamic agent options if this is the agent command
+	if cmd.Name == "agent" && len(cp.agentOptions) > 0 {
+		cp.subActive = true
+		cp.subItems = cp.agentOptions
+		cp.subSel = 0
+		cp.parentCmd = cmd.Name
+		return "" // signal: don't execute yet
+	}
 	if len(cmd.SubOptions) > 0 {
 		// Enter sub-option picker
 		cp.subActive = true
