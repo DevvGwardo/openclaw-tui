@@ -68,6 +68,7 @@ type Model struct {
 	activeRunID        string
 	ctrlCCount         int
 	lastCtrlC          time.Time
+	completedRunID     string // last run ID that finished — prevents duplicate messages
 	quitting           bool
 	mouseMode          bool
 	mouseFilter        mouseFilter // suppresses leaked mouse escape sequence fragments
@@ -995,6 +996,11 @@ func (m Model) handleGatewayEvent(evt gateway.GatewayEvent) (tea.Model, tea.Cmd)
 }
 
 func (m *Model) handleAgentEvent(agent *gateway.AgentEvent) {
+	// Skip events for a run that was already completed by the other handler
+	if agent.RunID != "" && agent.RunID == m.completedRunID {
+		return
+	}
+
 	switch agent.Stream {
 	case "assistant":
 		var data gateway.AgentAssistantData
@@ -1024,6 +1030,7 @@ func (m *Model) handleAgentEvent(agent *gateway.AgentEvent) {
 			return
 		}
 		if data.Phase == "end" && m.streaming {
+			m.completedRunID = m.activeRunID
 			m.streaming = false
 			m.activityBar.Stop()
 			m.chat.UpdateLastAssistant(m.streamBuf, false)
@@ -1035,6 +1042,11 @@ func (m *Model) handleAgentEvent(agent *gateway.AgentEvent) {
 }
 
 func (m *Model) handleChatEvent(chat *gateway.ChatEvent) {
+	// Skip events for a run that was already completed by the other handler
+	if chat.RunID != "" && chat.RunID == m.completedRunID {
+		return
+	}
+
 	switch chat.State {
 	case gateway.ChatStateDelta:
 		if !m.streaming {
@@ -1057,6 +1069,7 @@ func (m *Model) handleChatEvent(chat *gateway.ChatEvent) {
 		}
 
 	case gateway.ChatStateFinal:
+		m.completedRunID = chat.RunID
 		m.streaming = false
 		m.activityBar.Stop()
 		if chat.Message != nil {
@@ -1069,6 +1082,7 @@ func (m *Model) handleChatEvent(chat *gateway.ChatEvent) {
 		m.layout()
 
 	case gateway.ChatStateAborted:
+		m.completedRunID = chat.RunID
 		m.streaming = false
 		m.activityBar.Stop()
 		m.chat.UpdateLastAssistant(m.streamBuf+" [aborted]", false)
@@ -1077,6 +1091,7 @@ func (m *Model) handleChatEvent(chat *gateway.ChatEvent) {
 		m.layout()
 
 	case gateway.ChatStateError:
+		m.completedRunID = chat.RunID
 		m.streaming = false
 		m.activityBar.Stop()
 		errMsg := "Unknown error"
