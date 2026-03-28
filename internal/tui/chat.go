@@ -16,6 +16,9 @@ type ChatModel struct {
 	height      int
 	renderCache []string // cached rendered string per message
 	dirty       []bool   // true if message needs re-render
+	// Incremental viewport: only re-render from this index onward.
+	renderedUpTo     int
+	viewportContent  string
 }
 
 // NewChatModel creates a new chat viewport.
@@ -35,6 +38,8 @@ func (c *ChatModel) SetSize(w, h int) {
 	c.height = h
 	c.viewport.Width = w
 	c.viewport.Height = h
+	c.viewportContent = ""
+	c.renderedUpTo = 0
 	c.invalidateAll()
 	c.renderAll()
 }
@@ -57,7 +62,9 @@ func (c *ChatModel) AddMessage(msg ChatMsg) {
 	c.messages = append(c.messages, msg)
 	c.renderCache = append(c.renderCache, "")
 	c.dirty = append(c.dirty, true)
-	c.renderAll()
+	// Only re-render the new message, not everything
+	c.renderDirtyRange(len(c.messages)-1, len(c.messages))
+	c.updateViewportContent()
 	if wasAtBottom {
 		c.viewport.GotoBottom()
 	}
@@ -71,7 +78,9 @@ func (c *ChatModel) UpdateLastAssistant(content string, streaming bool) {
 			c.messages[i].Content = content
 			c.messages[i].Streaming = streaming
 			c.dirty[i] = true
-			c.renderAll()
+			// Only re-render this one message, not all of them
+			c.renderDirtyRange(i, i+1)
+			c.updateViewportContent()
 			if wasAtBottom {
 				c.viewport.GotoBottom()
 			}
@@ -87,7 +96,8 @@ func (c *ChatModel) AddToolToLastAssistant(tool ToolCall) {
 		if c.messages[i].Role == RoleAssistant {
 			c.messages[i].Tools = append(c.messages[i].Tools, tool)
 			c.dirty[i] = true
-			c.renderAll()
+			c.renderDirtyRange(i, i+1)
+			c.updateViewportContent()
 			if wasAtBottom {
 				c.viewport.GotoBottom()
 			}
@@ -101,7 +111,53 @@ func (c *ChatModel) Clear() {
 	c.messages = nil
 	c.renderCache = nil
 	c.dirty = nil
+	c.viewportContent = ""
+	c.renderedUpTo = 0
 	c.viewport.SetContent("")
+}
+
+// invalidateAll marks every message as needing re-render (for theme/size changes).
+func (c *ChatModel) invalidateAll() {
+	for i := range c.dirty {
+		c.dirty[i] = true
+	}
+	c.viewportContent = ""
+	c.renderedUpTo = 0
+}
+
+// renderDirtyRange re-renders messages in the half-open range [start, end).
+func (c *ChatModel) renderDirtyRange(start, end int) {
+	if start < 0 {
+		start = 0
+	}
+	if end > len(c.messages) {
+		end = len(c.messages)
+	}
+	for i := start; i < end; i++ {
+		if c.dirty[i] {
+			c.renderCache[i] = RenderMessage(c.messages[i], c.theme, c.width)
+			c.dirty[i] = false
+		}
+	}
+}
+
+// updateViewportContent rebuilds the viewport content from the render cache.
+func (c *ChatModel) updateViewportContent() {
+	var sb strings.Builder
+	sb.Grow(len(c.messages) * 200)
+	for _, cached := range c.renderCache {
+		sb.WriteString(cached)
+	}
+	c.viewportContent = sb.String()
+	c.viewport.SetContent(c.viewportContent)
+	c.renderedUpTo = len(c.messages)
+}
+
+func (c *ChatModel) renderAll() {
+	c.renderDirtyRange(0, len(c.messages))
+	c.viewportContent = ""
+	c.renderedUpTo = 0
+	c.updateViewportContent()
 }
 
 // MessageCount returns the number of messages.
@@ -153,24 +209,3 @@ func (c ChatModel) View() string {
 	return c.viewport.View()
 }
 
-// invalidateAll marks every message as needing re-render (for theme/size changes).
-func (c *ChatModel) invalidateAll() {
-	for i := range c.dirty {
-		c.dirty[i] = true
-	}
-}
-
-func (c *ChatModel) renderAll() {
-	// Re-render only dirty messages, reuse cached strings for the rest.
-	for i, msg := range c.messages {
-		if c.dirty[i] {
-			c.renderCache[i] = RenderMessage(msg, c.theme, c.width)
-			c.dirty[i] = false
-		}
-	}
-	var sb strings.Builder
-	for _, cached := range c.renderCache {
-		sb.WriteString(cached)
-	}
-	c.viewport.SetContent(sb.String())
-}

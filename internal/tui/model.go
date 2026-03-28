@@ -100,6 +100,15 @@ type Model struct {
 	historyIndex  int // for navigating history with up/down
 	reconnecting  bool
 	reconnectAttempt int
+
+	// View caching: compose once, return cached result until state changes.
+	viewCache      string
+	viewCacheValid bool
+}
+
+// invalidateView marks the cached view as stale so the next View() recomposes.
+func (m *Model) invalidateView() {
+	m.viewCacheValid = false
 }
 
 // NewModel creates the main TUI model.
@@ -175,6 +184,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		m.layout()
+		m.invalidateView()
 		return m, nil
 
 	case GatewayEventMsg:
@@ -203,6 +213,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			Content:   "Connected to OpenClaw gateway.",
 			Timestamp: time.Now(),
 		})
+		m.invalidateView()
 
 		var cmds []tea.Cmd
 		cmds = append(cmds, m.fetchModelInfo())
@@ -294,9 +305,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 // View implements tea.Model.
+// It caches the composed view string; recomposed only when state changes.
+// Background animation updates via its own internal cache (background.ApplyToView).
 func (m Model) View() string {
 	if m.quitting {
 		return m.theme.Muted.Render("Goodbye! 🦞\n")
+	}
+
+	if m.viewCacheValid {
+		return m.viewCache
 	}
 
 	margin := strings.Repeat(" ", sideMargin)
@@ -341,16 +358,24 @@ func (m Model) View() string {
 		view = overlayPalette(view, paletteView, m.width, m.height)
 	}
 
+	m.viewCache = view
+	m.viewCacheValid = true
 	return view
 }
 
 // addMarginToBlock prepends a margin string to each line in a block.
 func addMarginToBlock(block, margin string) string {
 	lines := strings.Split(block, "\n")
+	var sb strings.Builder
+	sb.Grow(len(block) + len(lines)*len(margin))
 	for i, line := range lines {
-		lines[i] = margin + line
+		sb.WriteString(margin)
+		sb.WriteString(line)
+		if i < len(lines)-1 {
+			sb.WriteByte('\n')
+		}
 	}
-	return strings.Join(lines, "\n")
+	return sb.String()
 }
 
 // overlayPalette composites the palette view on top of the main view,
@@ -643,6 +668,11 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.chat.ScrollDown(1)
 		return m, nil
 
+	case tea.KeyCtrlU:
+		// Clear the entire input line (standard readline convention)
+		m.input.Reset()
+		return m, nil
+
 	case tea.KeyEnter:
 		// Alt+Enter inserts a newline instead of submitting
 		if msg.Alt {
@@ -785,6 +815,7 @@ func (m Model) handleCommand(cmd *Command) (tea.Model, tea.Cmd) {
 			Content:   CommandHelp(m.theme),
 			Timestamp: time.Now(),
 		})
+		m.invalidateView()
 
 	case "exit", "quit":
 		// Save config before exiting
@@ -797,6 +828,7 @@ func (m Model) handleCommand(cmd *Command) (tea.Model, tea.Cmd) {
 
 	case "clear":
 		m.chat.Clear()
+		m.invalidateView()
 
 	case "theme":
 		name := ThemeName(cmd.Args)
@@ -808,6 +840,7 @@ func (m Model) handleCommand(cmd *Command) (tea.Model, tea.Cmd) {
 				Content:   msg,
 				Timestamp: time.Now(),
 			})
+			m.invalidateView()
 			return m, nil
 		}
 		m.setTheme(name)
@@ -818,6 +851,7 @@ func (m Model) handleCommand(cmd *Command) (tea.Model, tea.Cmd) {
 			Content:   fmt.Sprintf("Theme switched to %s.", cmd.Args),
 			Timestamp: time.Now(),
 		})
+		m.invalidateView()
 
 	case "bg":
 		if cmd.Args == "" {
@@ -829,6 +863,7 @@ func (m Model) handleCommand(cmd *Command) (tea.Model, tea.Cmd) {
 				Content:   fmt.Sprintf("Background: %s", mode),
 				Timestamp: time.Now(),
 			})
+			m.invalidateView()
 		} else {
 			mode := BgMode(cmd.Args)
 			valid := false
@@ -844,6 +879,7 @@ func (m Model) handleCommand(cmd *Command) (tea.Model, tea.Cmd) {
 					Content:   fmt.Sprintf("Unknown background mode: %s\nAvailable: off, starfield, tunnel, plasma, fire, matrix, ocean, cube, skibidi, sigma, npc, ohio, rizz, gyatt, amogus, bussin, aquarium", cmd.Args),
 					Timestamp: time.Now(),
 				})
+				m.invalidateView()
 				return m, nil
 			}
 			m.background.SetMode(mode)
@@ -854,6 +890,7 @@ func (m Model) handleCommand(cmd *Command) (tea.Model, tea.Cmd) {
 				Content:   fmt.Sprintf("Background: %s", mode),
 				Timestamp: time.Now(),
 			})
+			m.invalidateView()
 		}
 
 	case "think":
@@ -863,6 +900,7 @@ func (m Model) handleCommand(cmd *Command) (tea.Model, tea.Cmd) {
 				Content:   fmt.Sprintf("Current thinking level: %s\nUsage: /think <none|adaptive|full>", m.thinking),
 				Timestamp: time.Now(),
 			})
+			m.invalidateView()
 			return m, nil
 		}
 		m.thinking = cmd.Args
@@ -874,6 +912,7 @@ func (m Model) handleCommand(cmd *Command) (tea.Model, tea.Cmd) {
 			Content:   fmt.Sprintf("Thinking level set to %s.", cmd.Args),
 			Timestamp: time.Now(),
 		})
+		m.invalidateView()
 
 	case "status":
 		return m, m.requestStatus()
@@ -885,6 +924,7 @@ func (m Model) handleCommand(cmd *Command) (tea.Model, tea.Cmd) {
 				Content:   fmt.Sprintf("Current model: %s\nUsage: /model <name>", m.statusBar.Model()),
 				Timestamp: time.Now(),
 			})
+			m.invalidateView()
 			return m, nil
 		}
 		return m, m.setModel(cmd.Args)
@@ -900,12 +940,14 @@ func (m Model) handleCommand(cmd *Command) (tea.Model, tea.Cmd) {
 				Content:   fmt.Sprintf("Session switched to %s.", cmd.Args),
 				Timestamp: time.Now(),
 			})
+			m.invalidateView()
 		} else {
 			m.chat.AddMessage(ChatMsg{
 				Role:      RoleSystem,
 				Content:   fmt.Sprintf("Current session: %s\nUsage: /session <key>", m.sessionKey),
 				Timestamp: time.Now(),
 			})
+			m.invalidateView()
 		}
 
 	case "agent":
@@ -923,6 +965,7 @@ func (m Model) handleCommand(cmd *Command) (tea.Model, tea.Cmd) {
 			Content:   "No active run to abort.",
 			Timestamp: time.Now(),
 		})
+		m.invalidateView()
 
 	case "feed":
 		if m.background.Mode() != BgAquarium {
@@ -934,6 +977,7 @@ func (m Model) handleCommand(cmd *Command) (tea.Model, tea.Cmd) {
 			Content:   "🐟 Food dropped! Watch the fish swim toward it.",
 			Timestamp: time.Now(),
 		})
+		m.invalidateView()
 
 	case "attach", "image":
 		if cmd.Args == "" {
@@ -1122,15 +1166,18 @@ func (m Model) handleGatewayEvent(evt gateway.GatewayEvent) (tea.Model, tea.Cmd)
 			Content:   errMsg,
 			Timestamp: time.Now(),
 		})
+		m.invalidateView()
 
 	case "chat":
 		if evt.Chat != nil {
 			m.handleChatEvent(evt.Chat)
+			m.invalidateView()
 		}
 
 	case "agent":
 		if evt.Agent != nil {
 			m.handleAgentEvent(evt.Agent)
+			m.invalidateView()
 		}
 
 	case "btw":
@@ -1140,6 +1187,7 @@ func (m Model) handleGatewayEvent(evt gateway.GatewayEvent) (tea.Model, tea.Cmd)
 				Content:   fmt.Sprintf("💡 %s", evt.BTW.Message),
 				Timestamp: time.Now(),
 			})
+			m.invalidateView()
 		}
 
 	case "session.update":
@@ -1166,6 +1214,7 @@ func (m Model) handleGatewayEvent(evt gateway.GatewayEvent) (tea.Model, tea.Cmd)
 			Content:   errMsg,
 			Timestamp: time.Now(),
 		})
+		m.invalidateView()
 	}
 
 	return m, m.listenGateway()
@@ -1307,8 +1356,10 @@ func (m Model) listenGateway() tea.Cmd {
 
 func (m Model) tickCmd() tea.Cmd {
 	interval := 500 * time.Millisecond
-	if m.streaming || m.background.IsActive() {
+	if m.streaming {
 		interval = 100 * time.Millisecond
+	} else if m.background.IsActive() {
+		interval = m.background.TickInterval()
 	}
 	return tea.Tick(interval, func(t time.Time) tea.Msg {
 		return TickMsg(t)

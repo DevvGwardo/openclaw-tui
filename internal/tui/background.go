@@ -398,6 +398,18 @@ type BackgroundModel struct {
 	height int
 	frame  int
 
+	// Cached rendered lines — invalidated when frame or size changes
+	cachedLines  []string
+	cachedLineW  int
+	cachedLineH  int
+	cacheValid   bool
+
+	// Cached fully composed view string — invalidated when view content changes
+	cachedView   string
+	cachedViewW  int
+	cachedViewH  int
+	lastViewHash int
+
 	// Pixel buffer for half-block modes (color-intensive)
 	pb *pixelBuffer
 
@@ -483,6 +495,7 @@ func (b *BackgroundModel) SetMode(mode BgMode) {
 	b.mode = mode
 	b.frame = 0
 	b.charGrid = make(map[int]map[int]bgCell)
+	b.cacheValid = false
 	b.initMode()
 }
 
@@ -517,6 +530,7 @@ func (b *BackgroundModel) SetSize(w, h int) {
 	if b.mode != BgAquarium {
 		b.initMode()
 	}
+	b.cacheValid = false
 }
 
 // IsActive returns true if a background animation is running.
@@ -531,6 +545,29 @@ func (b *BackgroundModel) Tick() {
 	}
 	b.frame++
 	b.updateAnimation()
+	b.cacheValid = false
+	b.cachedView = "" // force recompose on next ApplyToView
+}
+
+// TickInterval returns the recommended tick interval for the current mode.
+// Simpler animations can run at lower rates to reduce CPU usage.
+func (b *BackgroundModel) TickInterval() time.Duration {
+	switch b.mode {
+	case BgOff:
+		return 0
+	case BgAquarium:
+		return 80 * time.Millisecond
+	case BgFire:
+		return 60 * time.Millisecond
+	case BgPlasma:
+		return 80 * time.Millisecond
+	case BgMatrix:
+		return 100 * time.Millisecond
+	case BgStarfield, BgTunnel, BgOcean, BgCube:
+		return 150 * time.Millisecond
+	default:
+		return 120 * time.Millisecond
+	}
 }
 
 func (b *BackgroundModel) ensurePixelBuffer() {
@@ -1408,23 +1445,27 @@ func (b *BackgroundModel) RenderLine(y, width int) string {
 	if b.mode == BgOff || width == 0 {
 		return strings.Repeat(" ", width)
 	}
+	// Use cached rendered lines when cache is valid
+	if b.cacheValid && b.cachedLines != nil && y < len(b.cachedLines) && b.cachedLineW == width {
+		return b.cachedLines[y]
+	}
+	return b.renderBgLine(y, width)
+}
+
+// renderBgLine renders a single background line for the cache.
+func (b *BackgroundModel) renderBgLine(y, width int) string {
+	if b.mode == BgOff || width == 0 {
+		return strings.Repeat(" ", width)
+	}
+	var rendered string
 	if b.isBrailleMode() && b.bb != nil {
-		rendered := b.bb.renderRow(y)
-		renderedLen := b.bb.termW
-		if renderedLen < width {
-			rendered += strings.Repeat(" ", width-renderedLen)
-		}
-		return rendered
+		rendered = b.bb.renderRow(y)
+	} else if b.isPixelMode() && b.pb != nil {
+		rendered = b.pb.renderRow(y)
+	} else {
+		rendered = b.renderCharLine(y, width)
 	}
-	if b.isPixelMode() && b.pb != nil {
-		rendered := b.pb.renderRow(y)
-		renderedLen := b.pb.width
-		if renderedLen < width {
-			rendered += strings.Repeat(" ", width-renderedLen)
-		}
-		return rendered
-	}
-	return b.renderCharLine(y, width)
+	return padString(rendered, width)
 }
 
 // renderCharLine renders a line for character-based effects (matrix).
@@ -1537,13 +1578,38 @@ func (b *BackgroundModel) RenderSegment(y, startX, endX int) string {
 }
 
 // ApplyToView composites the background behind the main view content.
+// It caches the fully composed result and only recomputes when the view content
+// or animation frame actually changes.
 func (b *BackgroundModel) ApplyToView(view string, width, height int) string {
 	if b.mode == BgOff || width == 0 || height == 0 {
 		return view
 	}
 
+	// Use cached result if view string hasn't changed AND line cache is valid.
+	if b.cacheValid && b.cachedView != "" && b.cachedViewW == width && b.cachedViewH == height && b.lastViewHash == strHash(view) {
+		return b.cachedView
+	}
+
+	// Rebuild the line cache if stale
+	if !b.cacheValid || b.cachedLineW != width || b.cachedLineH != height || len(b.cachedLines) != height {
+		b.cachedLines = make([]string, height)
+		b.cachedLineW = width
+		b.cachedLineH = height
+		for y := 0; y < height; y++ {
+			b.cachedLines[y] = b.renderBgLine(y, width)
+		}
+		b.cacheValid = true
+	}
+
 	lines := strings.Split(view, "\n")
 	result := make([]string, 0, height)
+
+	// Collect crab task labels to overlay
+	crabLabels := b.CrabLabels()
+	labelsByRow := make(map[int][]crabLabel)
+	for _, cl := range crabLabels {
+		labelsByRow[cl.row] = append(labelsByRow[cl.row], cl)
+	}
 
 	for y := 0; y < height; y++ {
 		var rendered string
@@ -1552,18 +1618,27 @@ func (b *BackgroundModel) ApplyToView(view string, width, height int) string {
 			stripped := stripAnsi(line)
 
 			if strings.TrimSpace(stripped) == "" && !hasAnsiBg(line) {
-				rendered = b.RenderLine(y, width)
+				rendered = b.cachedLines[y]
 			} else {
 				rendered = b.compositeLineWithBg(line, y, width)
 			}
 		} else {
-			rendered = b.RenderLine(y, width)
+			rendered = b.cachedLines[y]
+		}
+
+		// Overlay crab task labels on this row
+		if labels, ok := labelsByRow[y]; ok {
+			rendered = b.overlayCrabLabels(rendered, labels, y, width)
 		}
 
 		result = append(result, rendered)
 	}
 
-	return strings.Join(result, "\n")
+	b.cachedView = strings.Join(result, "\n")
+	b.cachedViewW = width
+	b.cachedViewH = height
+	b.lastViewHash = strHash(view)
+	return b.cachedView
 }
 
 // overlayCrabLabels composites crab task label text onto a rendered background line.
@@ -1765,7 +1840,47 @@ func ansiDisplayWidth(s string) int {
 // compositeLineWithBg walks through a line's ANSI sequences and injects
 // background colors from the animation behind characters that don't already
 // have an explicit background set.
+// compositeLineWithBg walks through a line's ANSI sequences and injects
+// background colors from the animation behind characters that don't already
+// have an explicit background set.
+// Fast path: if the line has no existing background ANSI codes, we inject
+// a single bg color at the start and end instead of per-character ANSI.
 func (b *BackgroundModel) compositeLineWithBg(line string, row, totalWidth int) string {
+	// Fast path: most UI lines use foreground-only lipgloss styles (no 48; bg codes).
+	if !containsBGCode(line) {
+		return b.compositeLineFast(line, row, totalWidth)
+	}
+	// Slow path: line has existing backgrounds — must parse per character.
+	return b.compositeLineSlow(line, row, totalWidth)
+}
+
+// containsBGCode does a quick scan for background ANSI codes (48;) without allocating.
+func containsBGCode(s string) bool {
+	for i := 0; i < len(s)-4; i++ {
+		if s[i] == '\x1b' && s[i+1] == '[' {
+			for j := i + 2; j < len(s) && s[j] != 'm'; j++ {
+				if s[j] == '4' && j+1 < len(s) && s[j+1] == '8' && j+2 < len(s) && s[j+2] == ';' {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+// compositeLineFast handles lines without existing background codes.
+func (b *BackgroundModel) compositeLineFast(line string, row, totalWidth int) string {
+	bgR, bgG, bgB := b.bgAvgColor(row)
+	trimmed := strings.TrimSuffix(line, "\x1b[0m")
+	var sb strings.Builder
+	sb.Grow(len(trimmed) + 30)
+	fmt.Fprintf(&sb, "\x1b[48;2;%d;%d;%dm%s\x1b[0m", bgR, bgG, bgB, trimmed)
+	return sb.String()
+}
+
+// compositeLineSlow does full per-character ANSI parsing for lines that
+// already have background codes set.
+func (b *BackgroundModel) compositeLineSlow(line string, row, totalWidth int) string {
 	var result strings.Builder
 	col := 0
 	hasBg := false
@@ -1813,6 +1928,56 @@ func (b *BackgroundModel) compositeLineWithBg(line string, row, totalWidth int) 
 
 	result.WriteString("\x1b[m")
 	return result.String()
+}
+
+// bgAvgColor returns the average background color for an entire row.
+// Used by the fast path to avoid per-character lookups.
+func (b *BackgroundModel) bgAvgColor(row int) (r, g, bVal int) {
+	if b.isBrailleMode() && b.bb != nil {
+		return b.bb.bgColorAt(row, 0)
+	}
+	if b.isPixelMode() && b.pb != nil {
+		return b.pb.bgColorAt(row, 0)
+	}
+	return 6, 6, 10
+}
+
+// padString pads a rendered line to the given width with trailing spaces.
+func padString(s string, width int) string {
+	vis := stripAnsiWidth(s)
+	if vis >= width {
+		return s
+	}
+	return s + strings.Repeat(" ", width-vis)
+}
+
+// stripAnsiWidth returns the visible character count of a string with ANSI codes.
+func stripAnsiWidth(s string) int {
+	w := 0
+	inEsc := false
+	for _, r := range s {
+		if r == '\x1b' {
+			inEsc = true
+			continue
+		}
+		if inEsc {
+			if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' {
+				inEsc = false
+			}
+			continue
+		}
+		w++
+	}
+	return w
+}
+
+// strHash is a cheap string hash for cache invalidation.
+func strHash(s string) int {
+	h := 0
+	for i := 0; i < len(s); i++ {
+		h = h*31 + int(s[i])
+	}
+	return h
 }
 
 // cellAt returns the animation character and color at a grid position.

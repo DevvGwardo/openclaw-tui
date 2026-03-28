@@ -157,13 +157,17 @@ func renderAssistantMessage(msg ChatMsg, theme Theme, width int) string {
 		content = renderGlamourMarkdown(msg.Content, contentWidth)
 	}
 
-	// Tool calls
+	// Tool calls — use strings.Builder to avoid slice allocations
 	if len(msg.Tools) > 0 {
-		var toolParts []string
-		for _, tool := range msg.Tools {
-			toolParts = append(toolParts, renderToolCall(tool, theme, contentWidth))
+		var sb strings.Builder
+		sb.Grow(len(msg.Tools) * 60)
+		for i, tool := range msg.Tools {
+			if i > 0 {
+				sb.WriteString("\n")
+			}
+			sb.WriteString(renderToolCall(tool, theme, contentWidth))
 		}
-		content += "\n" + strings.Join(toolParts, "\n")
+		content += "\n" + sb.String()
 	}
 
 	body := lipgloss.NewStyle().
@@ -261,7 +265,11 @@ func renderToolCall(tool ToolCall, theme Theme, width int) string {
 	header := style.Render(fmt.Sprintf("%s %s", icon, tool.Name))
 	if tool.Output != "" {
 		output := theme.Muted.Width(width - 4).Render(tool.Output)
-		return header + "\n" + output
+		var sb strings.Builder
+		sb.WriteString(header)
+		sb.WriteString("\n")
+		sb.WriteString(output)
+		return sb.String()
 	}
 	return header
 }

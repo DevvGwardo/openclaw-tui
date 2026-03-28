@@ -24,7 +24,7 @@ func NewInputModel(theme Theme) InputModel {
 	ta.Prompt = "" // no prompt character inside the textarea
 	ta.ShowLineNumbers = false
 	ta.CharLimit = 0
-	ta.SetHeight(3)
+	ta.SetHeight(5) // taller for comfortable multiline editing
 	ta.Focus()
 
 	// Apply theme colors
