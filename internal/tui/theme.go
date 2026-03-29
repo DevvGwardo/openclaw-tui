@@ -11,10 +11,11 @@ const (
 	ThemeRose     ThemeName = "rose"
 	ThemeForest   ThemeName = "forest"
 	ThemeAquarium ThemeName = "aquarium"
+	ThemeWebsite  ThemeName = "website"
 )
 
 // ThemeNames lists all available themes.
-var ThemeNames = []ThemeName{ThemeOcean, ThemeAmber, ThemeRose, ThemeForest, ThemeAquarium}
+var ThemeNames = []ThemeName{ThemeOcean, ThemeAmber, ThemeRose, ThemeForest, ThemeAquarium, ThemeWebsite}
 
 // Palette defines the colors for a theme.
 type Palette struct {
@@ -29,7 +30,12 @@ type Palette struct {
 	Warning     lipgloss.Color
 	Error       lipgloss.Color
 	UserBg      lipgloss.Color
+	AssistBg    lipgloss.Color
 	AssistBorder lipgloss.Color
+	CardBg      lipgloss.Color
+	CardBorder  lipgloss.Color
+	NavBg       lipgloss.Color
+	NavFg       lipgloss.Color
 }
 
 var palettes = map[ThemeName]Palette{
@@ -45,7 +51,12 @@ var palettes = map[ThemeName]Palette{
 		Warning:      lipgloss.Color("#F6C453"),
 		Error:        lipgloss.Color("#E87070"),
 		UserBg:       lipgloss.Color("#1E2A3A"),
+		AssistBg:     lipgloss.Color("#1E2A3A"),
 		AssistBorder: lipgloss.Color("#5EBED6"),
+		CardBg:       lipgloss.Color("#1E2A3A"),
+		CardBorder:   lipgloss.Color("#3A4A5A"),
+		NavBg:        lipgloss.Color("#252640"),
+		NavFg:        lipgloss.Color("#8888A0"),
 	},
 	ThemeAmber: {
 		Primary:      lipgloss.Color("#F6C453"),
@@ -59,7 +70,12 @@ var palettes = map[ThemeName]Palette{
 		Warning:      lipgloss.Color("#F6C453"),
 		Error:        lipgloss.Color("#E87070"),
 		UserBg:       lipgloss.Color("#2A2518"),
+		AssistBg:     lipgloss.Color("#2A2518"),
 		AssistBorder: lipgloss.Color("#F6C453"),
+		CardBg:       lipgloss.Color("#2A2518"),
+		CardBorder:   lipgloss.Color("#4A4030"),
+		NavBg:        lipgloss.Color("#2A2720"),
+		NavFg:        lipgloss.Color("#A09880"),
 	},
 	ThemeRose: {
 		Primary:      lipgloss.Color("#E87CA0"),
@@ -73,7 +89,12 @@ var palettes = map[ThemeName]Palette{
 		Warning:      lipgloss.Color("#F6C453"),
 		Error:        lipgloss.Color("#E87070"),
 		UserBg:       lipgloss.Color("#2A1825"),
+		AssistBg:     lipgloss.Color("#2A1825"),
 		AssistBorder: lipgloss.Color("#E87CA0"),
+		CardBg:       lipgloss.Color("#2A1825"),
+		CardBorder:   lipgloss.Color("#4A3040"),
+		NavBg:        lipgloss.Color("#2A2530"),
+		NavFg:        lipgloss.Color("#9888A0"),
 	},
 	ThemeForest: {
 		Primary:      lipgloss.Color("#6CC890"),
@@ -87,7 +108,12 @@ var palettes = map[ThemeName]Palette{
 		Warning:      lipgloss.Color("#F6C453"),
 		Error:        lipgloss.Color("#E87070"),
 		UserBg:       lipgloss.Color("#182A1E"),
+		AssistBg:     lipgloss.Color("#182A1E"),
 		AssistBorder: lipgloss.Color("#6CC890"),
+		CardBg:       lipgloss.Color("#182A1E"),
+		CardBorder:   lipgloss.Color("#304030"),
+		NavBg:        lipgloss.Color("#202A22"),
+		NavFg:        lipgloss.Color("#80A088"),
 	},
 	ThemeAquarium: {
 		Primary:      lipgloss.Color("#00B4D8"),
@@ -101,7 +127,32 @@ var palettes = map[ThemeName]Palette{
 		Warning:      lipgloss.Color("#F4A261"),
 		Error:        lipgloss.Color("#E76F51"),
 		UserBg:       lipgloss.Color("#0D1E30"),
+		AssistBg:     lipgloss.Color("#0D1E30"),
 		AssistBorder: lipgloss.Color("#00B4D8"),
+		CardBg:       lipgloss.Color("#0D1E30"),
+		CardBorder:   lipgloss.Color("#1A3A50"),
+		NavBg:        lipgloss.Color("#0F2035"),
+		NavFg:        lipgloss.Color("#5E8BA0"),
+	},
+	// Website theme: modern, clean, with card-based UI
+	ThemeWebsite: {
+		Primary:      lipgloss.Color("#3B82F6"),
+		Secondary:    lipgloss.Color("#8B5CF6"),
+		Accent:       lipgloss.Color("#06B6D4"),
+		Bg:           lipgloss.Color("#0F172A"),
+		BgSubtle:     lipgloss.Color("#1E293B"),
+		Fg:           lipgloss.Color("#F8FAFC"),
+		FgMuted:      lipgloss.Color("#94A3B8"),
+		Success:      lipgloss.Color("#10B981"),
+		Warning:      lipgloss.Color("#F59E0B"),
+		Error:        lipgloss.Color("#EF4444"),
+		UserBg:       lipgloss.Color("#1E3A5F"),
+		AssistBg:     lipgloss.Color("#1E293B"),
+		AssistBorder: lipgloss.Color("#3B82F6"),
+		CardBg:       lipgloss.Color("#1E293B"),
+		CardBorder:   lipgloss.Color("#334155"),
+		NavBg:        lipgloss.Color("#1E293B"),
+		NavFg:        lipgloss.Color("#94A3B8"),
 	},
 }
 
@@ -110,31 +161,47 @@ type Theme struct {
 	Name    ThemeName
 	Palette Palette
 
-	// Styles
-	HeaderStyle      lipgloss.Style
-	HeaderTitle      lipgloss.Style
-	HeaderInfo       lipgloss.Style
-	StatusBarStyle   lipgloss.Style
-	StatusItem       lipgloss.Style
-	StatusConnected  lipgloss.Style
+	// Styles - Website-like UI
+	HeaderStyle         lipgloss.Style
+	HeaderTitle        lipgloss.Style
+	HeaderInfo         lipgloss.Style
+	NavStyle           lipgloss.Style
+	NavItem            lipgloss.Style
+	NavItemActive      lipgloss.Style
+	StatusBarStyle     lipgloss.Style
+	StatusItem         lipgloss.Style
+	StatusConnected    lipgloss.Style
 	StatusDisconnected lipgloss.Style
-	UserPrefix       lipgloss.Style
-	UserMessage      lipgloss.Style
-	AssistPrefix     lipgloss.Style
-	AssistBorder     lipgloss.Style
-	AssistMessage    lipgloss.Style
-	SystemMessage    lipgloss.Style
-	ErrorMessage     lipgloss.Style
-	InputStyle       lipgloss.Style
-	InputPrompt      lipgloss.Style
-	CodeBlock        lipgloss.Style
-	ToolRunning      lipgloss.Style
-	ToolDone         lipgloss.Style
-	ToolFailed       lipgloss.Style
-	TokenLow         lipgloss.Style
-	TokenMed         lipgloss.Style
-	TokenHigh        lipgloss.Style
-	Muted            lipgloss.Style
+
+	// Message styles - Card-based
+	UserCardStyle       lipgloss.Style
+	AssistCardStyle    lipgloss.Style
+	UserPrefix         lipgloss.Style
+	UserMessage        lipgloss.Style
+	AssistPrefix       lipgloss.Style
+	AssistBorder       lipgloss.Style
+	AssistMessage      lipgloss.Style
+	SystemMessage      lipgloss.Style
+	ErrorMessage       lipgloss.Style
+
+	// Input styles
+	InputStyle          lipgloss.Style
+	InputPrompt         lipgloss.Style
+	CodeBlock           lipgloss.Style
+
+	// Tool styles
+	ToolRunning         lipgloss.Style
+	ToolDone            lipgloss.Style
+	ToolFailed          lipgloss.Style
+
+	// Token styles
+	TokenLow            lipgloss.Style
+	TokenMed            lipgloss.Style
+	TokenHigh           lipgloss.Style
+
+	// Misc
+	Muted               lipgloss.Style
+	CardStyle           lipgloss.Style
 }
 
 // NewTheme creates a Theme from a theme name.
@@ -145,6 +212,7 @@ func NewTheme(name ThemeName) Theme {
 		name = ThemeOcean
 	}
 
+	// Website-like: card-based messages with clear visual hierarchy
 	return Theme{
 		Name:    name,
 		Palette: p,
@@ -157,10 +225,26 @@ func NewTheme(name ThemeName) Theme {
 
 		HeaderTitle: lipgloss.NewStyle().
 			Foreground(p.Primary).
-			Bold(true),
+			Bold(true).
+			Padding(0, 1),
 
 		HeaderInfo: lipgloss.NewStyle().
 			Foreground(p.FgMuted),
+
+		// Navigation bar style (website-like top bar)
+		NavStyle: lipgloss.NewStyle().
+			Background(p.NavBg).
+			Foreground(p.NavFg).
+			Padding(0, 2),
+
+		NavItem: lipgloss.NewStyle().
+			Foreground(p.NavFg).
+			Padding(0, 1),
+
+		NavItemActive: lipgloss.NewStyle().
+			Foreground(p.Primary).
+			Bold(true).
+			Padding(0, 1),
 
 		StatusBarStyle: lipgloss.NewStyle().
 			Background(p.BgSubtle).
@@ -176,6 +260,23 @@ func NewTheme(name ThemeName) Theme {
 
 		StatusDisconnected: lipgloss.NewStyle().
 			Foreground(p.Error),
+
+		// Card-based message styles (website-like)
+		UserCardStyle: lipgloss.NewStyle().
+			Background(p.UserBg).
+			Foreground(p.Fg).
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(p.Secondary).
+			Padding(1, 2).
+			Margin(0, 0),
+
+		AssistCardStyle: lipgloss.NewStyle().
+			Background(p.AssistBg).
+			Foreground(p.Fg).
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(p.AssistBorder).
+			Padding(1, 2).
+			Margin(0, 0),
 
 		UserPrefix: lipgloss.NewStyle().
 			Foreground(p.Secondary).
@@ -212,7 +313,9 @@ func NewTheme(name ThemeName) Theme {
 		CodeBlock: lipgloss.NewStyle().
 			Background(p.BgSubtle).
 			Foreground(p.Accent).
-			Padding(0, 1),
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(p.CardBorder).
+			Padding(1, 2),
 
 		ToolRunning: lipgloss.NewStyle().
 			Foreground(p.Warning),
@@ -234,5 +337,11 @@ func NewTheme(name ThemeName) Theme {
 
 		Muted: lipgloss.NewStyle().
 			Foreground(p.FgMuted),
+
+		CardStyle: lipgloss.NewStyle().
+			Background(p.CardBg).
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(p.CardBorder).
+			Padding(1, 2),
 	}
 }

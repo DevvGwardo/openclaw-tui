@@ -1407,3 +1407,331 @@ func repeatRune(r rune, n int) string {
 	}
 	return string(b)
 }
+
+// --- Dot Matrix Aquarium ---
+// A grid of luminous dots that ripple and flow like an underwater bioluminescent display.
+// Each dot pulses with wave patterns, and nearby dots form soft constellation lines.
+
+// dotMatrixCell is a single dot in the matrix grid.
+type dotMatrixCell struct {
+	x, y         int       // grid position
+	phase        float64   // individual phase offset for pulsing
+	brightness   float64   // current brightness 0-1
+	targetBright float64   // target brightness
+	connections  []int     // indices of nearby connected dots
+}
+
+// dotMatrixState holds the entire dot matrix animation state.
+type dotMatrixState struct {
+	dots        []dotMatrixCell
+	width       int
+	height      int
+	gridSpacing int           // spacing between dots
+	waveTime    float64
+	ripples     []ripple      // active ripple disturbances
+}
+
+// ripple is a circular wave propagating through the dot matrix.
+type ripple struct {
+	x      float64 // center position (in grid coords)
+	y      float64
+	radius float64 // current radius
+	speed  float64 // expansion speed
+	strength float64
+	alive   bool
+}
+
+func (b *BackgroundModel) initDotMatrix() {
+	if b.width == 0 || b.height == 0 {
+		return
+	}
+
+	// Grid spacing - denser dots for a richer matrix look
+	spacing := 3
+	b.dotMatrix = &dotMatrixState{
+		width:       b.width,
+		height:      b.height,
+		gridSpacing: spacing,
+		waveTime:    0,
+		ripples:     make([]ripple, 0),
+	}
+
+	// Calculate grid dimensions
+	cols := b.width / spacing
+	rows := b.height*2 / spacing // double density for half-block vertical resolution
+
+	b.dotMatrix.dots = make([]dotMatrixCell, cols*rows)
+	b.dotMatrix.width = cols
+	b.dotMatrix.height = rows
+
+	// Initialize each dot with random phase and connections
+	rng := b.rng
+	for i := range b.dotMatrix.dots {
+		gx := i % cols
+		gy := i / cols
+
+		cell := &b.dotMatrix.dots[i]
+		cell.x = gx
+		cell.y = gy
+		cell.phase = rng.Float64() * math.Pi * 2
+		cell.brightness = 0
+		cell.targetBright = 0
+
+		// Build connections to nearby dots (8-directional, limited range)
+		maxDist := 3
+		for j := range b.dotMatrix.dots {
+			if j == i {
+				continue
+			}
+			dx := (j % cols) - gx
+			dy := (j / cols) - gy
+			dist := math.Sqrt(float64(dx*dx + dy*dy))
+			if dist <= float64(maxDist) && dist > 0 {
+				if rng.Float64() < 0.3 { // 30% chance of connection
+					cell.connections = append(cell.connections, j)
+				}
+			}
+		}
+	}
+
+	// Spawn initial ripples
+	b.spawnRipple(float64(cols/2), float64(rows/2))
+}
+
+func (b *BackgroundModel) spawnRipple(x, y float64) {
+	if b.dotMatrix == nil {
+		return
+	}
+	r := ripple{
+		x:       x,
+		y:       y,
+		radius:  0,
+		speed:   0.8 + b.rng.Float64()*0.6,
+		strength: 0.6 + b.rng.Float64()*0.4,
+		alive:   true,
+	}
+	b.dotMatrix.ripples = append(b.dotMatrix.ripples, r)
+}
+
+func (b *BackgroundModel) updateDotMatrix() {
+	if b.dotMatrix == nil {
+		b.initDotMatrix()
+		return
+	}
+
+	b.ensurePixelBuffer()
+	b.pb.clear()
+
+	if b.width == 0 || b.height == 0 {
+		return
+	}
+
+	spacing := b.dotMatrix.gridSpacing
+	b.dotMatrix.waveTime += 0.03
+
+	t := b.dotMatrix.waveTime
+	cols := b.dotMatrix.width
+	rows := b.dotMatrix.height
+
+	// Randomly spawn new ripples
+	if b.rng.Float64() < 0.008 && len(b.dotMatrix.ripples) < 5 {
+		b.spawnRipple(
+			b.rng.Float64()*float64(cols),
+			b.rng.Float64()*float64(rows),
+		)
+	}
+
+	// Update ripples and remove dead ones
+	var liveRipples []ripple
+	for i := range b.dotMatrix.ripples {
+		r := &b.dotMatrix.ripples[i]
+		r.radius += r.speed
+		if r.radius < float64(cols+rows) {
+			liveRipples = append(liveRipples, *r)
+		}
+	}
+	b.dotMatrix.ripples = liveRipples
+
+	// Calculate brightness for each dot based on wave patterns and ripples
+	for i := range b.dotMatrix.dots {
+		cell := &b.dotMatrix.dots[i]
+
+		// Base wave: gentle undulating pattern
+		wave1 := math.Sin(t*0.8 + float64(cell.x)*0.15 + float64(cell.y)*0.1)
+		wave2 := math.Sin(t*0.5 + float64(cell.x)*0.08 - float64(cell.y)*0.12)
+		wave3 := math.Cos(t*0.3 + float64(cell.x)*0.05 + float64(cell.y)*0.05)
+		combinedWave := (wave1*0.5 + wave2*0.3 + wave3*0.2 + 1.0) / 2.0
+
+		// Ripple influence
+		rippleBoost := 0.0
+		for _, r := range b.dotMatrix.ripples {
+			dx := float64(cell.x) - r.x
+			dy := float64(cell.y) - r.y
+			dist := math.Sqrt(dx*dx + dy*dy)
+			// Ripple ring: brightest at the edge
+			ringDist := math.Abs(dist - r.radius)
+			if ringDist < 2.0 {
+				ringStrength := 1.0 - ringDist/2.0
+				fade := 1.0 - r.radius/(float64(cols+rows))
+				rippleBoost += r.strength * ringStrength * fade * 0.7
+			}
+		}
+
+		// Individual phase creates twinkling variation
+		phaseTwinkle := math.Sin(t*2.0+cell.phase) * 0.1
+
+		// Bioluminescent pulse: slow breathing effect
+		bioPulse := math.Sin(t*0.4+cell.phase*0.5) * 0.15
+
+		// Target brightness
+		cell.targetBright = combinedWave*0.4 + bioPulse + phaseTwinkle + rippleBoost
+		if cell.targetBright < 0.05 {
+			cell.targetBright = 0.05 // minimum glow
+		}
+		if cell.targetBright > 1.0 {
+			cell.targetBright = 1.0
+		}
+
+		// Smooth interpolation toward target (creates trailing glow)
+		cell.brightness += (cell.targetBright - cell.brightness) * 0.08
+	}
+
+	// Render dots and connections to pixel buffer
+	dotColorR := uint8(60)
+	dotColorG := uint8(180)
+	dotColorB := uint8(255)
+
+	connectionColorR := uint8(30)
+	connectionColorG := uint8(100)
+	connectionColorB := uint8(180)
+
+	// First pass: draw connections between dots
+	for i := range b.dotMatrix.dots {
+		cell := &b.dotMatrix.dots[i]
+		if len(cell.connections) == 0 {
+			continue
+		}
+
+		px := cell.x * spacing
+		py := cell.y * spacing
+
+		for _, connIdx := range cell.connections {
+			if connIdx >= len(b.dotMatrix.dots) {
+				continue
+			}
+			connCell := &b.dotMatrix.dots[connIdx]
+			cpx := connCell.x * spacing
+			cpy := connCell.y * spacing
+
+			// Connection brightness based on both dots
+			connBright := (cell.brightness + connCell.brightness) / 2.0
+
+			// Draw line between dots
+			steps := spacing * 2
+			for s := 0; s < steps; s++ {
+				tfrac := float64(s) / float64(steps)
+				ix := int(float64(px)*(1-tfrac) + float64(cpx)*tfrac)
+				iy := int(float64(py)*(1-tfrac) + float64(cpy)*tfrac)
+
+				if ix >= 0 && ix < b.width && iy >= 0 && iy < b.height*2 {
+					alpha := connBright * (1.0 - math.Abs(tfrac-0.5)*2.0) * 0.3
+					cr := uint8(float64(connectionColorR) * alpha)
+					cg := uint8(float64(connectionColorG) * alpha)
+					cb := uint8(float64(connectionColorB) * alpha)
+					b.pb.set(ix, iy, cr, cg, cb)
+				}
+			}
+		}
+	}
+
+	// Second pass: draw dot glows
+	for i := range b.dotMatrix.dots {
+		cell := &b.dotMatrix.dots[i]
+		if cell.brightness < 0.05 {
+			continue
+		}
+
+		px := cell.x * spacing
+		py := cell.y * spacing
+
+		bright := cell.brightness
+
+		// Core dot (brightest center)
+		coreR := uint8(float64(dotColorR) * bright)
+		coreG := uint8(float64(dotColorG) * bright)
+		coreB := uint8(float64(dotColorB) * bright)
+		b.pb.set(px, py, coreR, coreG, coreB)
+
+		// Glow halo (surrounding pixels fade out)
+		if bright > 0.2 {
+			glowAlpha := bright * 0.5
+			glowR := uint8(float64(dotColorR) * glowAlpha * 0.7)
+			glowG := uint8(float64(dotColorG) * glowAlpha)
+			glowB := uint8(float64(dotColorB) * glowAlpha * 0.9)
+
+			// Check bounds and draw glow pixels
+			if px > 0 && py > 0 {
+				b.pb.set(px-1, py-1, glowR, glowG, glowB)
+			}
+			if px < b.width-1 && py > 0 {
+				b.pb.set(px+1, py-1, glowR, glowG, glowB)
+			}
+			if px > 0 && py < b.height*2-1 {
+				b.pb.set(px-1, py+1, glowR, glowG, glowB)
+			}
+			if px < b.width-1 && py < b.height*2-1 {
+				b.pb.set(px+1, py+1, glowR, glowG, glowB)
+			}
+		}
+
+		// Extra glow for very bright dots
+		if bright > 0.6 {
+			glowR := uint8(float64(dotColorR) * bright * 0.3)
+			glowG := uint8(float64(dotColorG) * bright * 0.4)
+			glowB := uint8(float64(dotColorB) * bright * 0.5)
+
+			if px > 1 && py > 1 {
+				b.pb.set(px-2, py-2, glowR, glowG, glowB)
+			}
+			if px < b.width-2 && py > 1 {
+				b.pb.set(px+2, py-2, glowR, glowG, glowB)
+			}
+			if px > 1 && py < b.height*2-2 {
+				b.pb.set(px-2, py+2, glowR, glowG, glowB)
+			}
+			if px < b.width-2 && py < b.height*2-2 {
+				b.pb.set(px+2, py+2, glowR, glowG, glowB)
+			}
+		}
+	}
+
+	// Add ambient caustic-like shimmer on the background
+	for py := 0; py < b.height*2; py++ {
+		for x := 0; x < b.width; x++ {
+			// Only add shimmer where there aren't bright dots
+			// Check if this area is near any dot
+			nearDot := false
+			cellX := x / spacing
+			cellY := py / spacing
+			if cellX < cols && cellY < rows {
+				idx := cellY*cols + cellX
+				if idx < len(b.dotMatrix.dots) {
+					nearDot = b.dotMatrix.dots[idx].brightness > 0.1
+				}
+			}
+
+			if !nearDot {
+				// Soft blue ambient shimmer
+				shimmer := b.fastSin(float64(x)*0.3+t*0.5) * b.fastSin(float64(py)*0.2+t*0.3)
+				shimmer = (shimmer + 1.0) / 2.0 * 0.08
+				if shimmer > 0 {
+					existing := b.pb.get(x, py)
+					newR := uint8(float64(existing.r) + shimmer*20)
+					newG := uint8(float64(existing.g) + shimmer*40)
+					newB := uint8(float64(existing.b) + shimmer*60)
+					b.pb.set(x, py, newR, newG, newB)
+				}
+			}
+		}
+	}
+}

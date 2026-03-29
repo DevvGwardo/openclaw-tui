@@ -9,6 +9,7 @@ import (
 )
 
 // InputModel handles text input for chat messages.
+// Website-like: clean card input with clear send button
 type InputModel struct {
 	textarea        textarea.Model
 	theme           Theme
@@ -20,7 +21,7 @@ type InputModel struct {
 // NewInputModel creates a new text input.
 func NewInputModel(theme Theme) InputModel {
 	ta := textarea.New()
-	ta.Placeholder = "Type a message... (Enter to send, Alt+Enter for newline)"
+	ta.Placeholder = "Type your message here..."
 	ta.Prompt = "" // no prompt character inside the textarea
 	ta.ShowLineNumbers = false
 	ta.CharLimit = 0
@@ -72,7 +73,6 @@ func (m *InputModel) Reset() {
 }
 
 // InsertNewline inserts a newline character at the cursor position.
-// Used during bracketed paste to preserve multiline content.
 func (m *InputModel) InsertNewline() {
 	m.textarea.InsertString("\n")
 }
@@ -112,30 +112,56 @@ func (m InputModel) Update(msg tea.Msg) (InputModel, tea.Cmd) {
 }
 
 // View renders the input area.
+// Website-like: card-style input with clear send indicator
 func (m InputModel) View() string {
 	p := m.theme.Palette
 
-	// Clean, minimal border
-	border := lipgloss.NewStyle().
+	// Attachment indicator
+	var attachmentBadge string
+	if m.attachmentCount > 0 {
+		attachmentBadge = lipgloss.NewStyle().
+			Background(p.Accent).
+			Foreground(lipgloss.Color("#FFFFFF")).
+			Padding(0, 1).
+			Render(fmt.Sprintf("📎 %d", m.attachmentCount))
+	}
+
+	// Send hint
+	sendHint := lipgloss.NewStyle().
+		Foreground(p.FgMuted).
+		Render("↵ send")
+
+	newlineHint := lipgloss.NewStyle().
+		Foreground(p.FgMuted).
+		Render("alt+↵ newline")
+
+	hints := lipgloss.NewStyle().
+		Foreground(p.FgMuted).
+		Render(sendHint + "  " + newlineHint)
+
+	// Card border style - website-like
+	borderColor := p.CardBorder
+	if m.focused {
+		borderColor = p.Primary
+	}
+
+	cardBorder := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(p.BgSubtle).
+		BorderForeground(borderColor).
 		BorderBackground(p.Bg).
 		Padding(0, 1).
 		Width(m.width - 2)
 
-	if m.focused {
-		border = border.BorderForeground(p.Primary)
-	}
-
 	content := m.textarea.View()
 
-	// Show attachment indicator above the textarea
+	// Build the input section header
+	inputHeader := ""
 	if m.attachmentCount > 0 {
-		badge := lipgloss.NewStyle().
-			Foreground(p.Accent).
-			Render(fmt.Sprintf("• %d image(s) attached", m.attachmentCount))
-		content = badge + "\n" + content
+		inputHeader = attachmentBadge + "  "
 	}
 
-	return border.Render(content)
+	// Wrap content in the card
+	cardContent := inputHeader + content + "  " + hints
+
+	return cardBorder.Render(cardContent)
 }

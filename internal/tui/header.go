@@ -7,6 +7,7 @@ import (
 )
 
 // HeaderModel is the top header bar showing branding and connection status.
+// Website-like: clean gradient title with status badges
 type HeaderModel struct {
 	width     int
 	connected bool
@@ -40,43 +41,98 @@ func (h *HeaderModel) SetTheme(t Theme) {
 }
 
 // View renders the header.
+// Website-like layout: [● Logo + Title] -------- [Status Badge] [URL]
 func (h HeaderModel) View() string {
-	title := renderGradientTitle(h.theme)
-	ver := h.theme.HeaderInfo.Render(fmt.Sprintf("v%s", h.version))
+	p := h.theme.Palette
 
-	var connStatus string
+	// Create logo icon
+	logoIcon := lipgloss.NewStyle().
+		Foreground(p.Primary).
+		Bold(true).
+		Render("◆")
+
+	// Title with gradient effect
+	title := renderGradientTitle(h.theme)
+
+	// Version badge
+	verBadge := lipgloss.NewStyle().
+		Background(p.BgSubtle).
+		Foreground(p.FgMuted).
+		Padding(0, 1).
+		Render("v" + h.version)
+
+	// Connection status badge - website-like pill
+	var statusBadge string
 	if h.connected {
-		connStatus = h.theme.StatusConnected.Render("● connected")
+		statusBadge = lipgloss.NewStyle().
+			Background(p.Success).
+			Foreground(lipgloss.Color("#FFFFFF")).
+			Padding(0, 1).
+			Render("● ONLINE")
 	} else {
-		connStatus = h.theme.StatusDisconnected.Render("○ disconnected")
+		statusBadge = lipgloss.NewStyle().
+			Background(p.Error).
+			Foreground(lipgloss.Color("#FFFFFF")).
+			Padding(0, 1).
+			Render("● OFFLINE")
 	}
 
-	urlDisplay := h.theme.Muted.Render(h.url)
+	// URL display
+	urlDisplay := lipgloss.NewStyle().
+		Foreground(p.FgMuted).
+		Render(h.url)
 
-	left := fmt.Sprintf("%s  %s  %s", title, ver, connStatus)
-	right := urlDisplay
+	// Left section: logo + title
+	left := fmt.Sprintf("%s %s  %s", logoIcon, title, verBadge)
 
+	// Right section: status + url
+	right := fmt.Sprintf("%s  %s", statusBadge, urlDisplay)
+
+	// Calculate spacing
 	gap := h.width - lipgloss.Width(left) - lipgloss.Width(right) - 2
 	if gap < 1 {
 		gap = 1
 	}
 
-	padding := ""
-	for i := 0; i < gap; i++ {
-		padding += " "
+	// Top border line - website-like divider
+	topLine := ""
+	if h.width > 4 {
+		topLine = lipgloss.NewStyle().
+			Foreground(p.CardBorder).
+			Render("┌" + repeatString("─", h.width-2) + "┐")
 	}
 
+	// Main header content
+	padding := repeatString(" ", gap)
 	line := left + padding + right
 
-	return h.theme.HeaderStyle.Width(h.width).Render(line)
+	headerContent := lipgloss.NewStyle().
+		Background(p.Bg).
+		Padding(0, 1).
+		Width(h.width).
+		Render(line)
+
+	// Bottom border line
+	bottomLine := ""
+	if h.width > 4 {
+		bottomLine = lipgloss.NewStyle().
+			Foreground(p.CardBorder).
+			Render("├" + repeatString("─", h.width-2) + "┤")
+	}
+
+	// Build the complete header
+	if bottomLine != "" {
+		return fmt.Sprintf("%s\n%s\n%s", topLine, headerContent, bottomLine)
+	}
+	return headerContent
 }
 
-// renderGradientTitle renders "🦞 OpenClaw" with gradient colors.
+// renderGradientTitle renders "dY◆z OpenClaw" with gradient colors.
 func renderGradientTitle(theme Theme) string {
 	text := "OpenClaw"
 	p := theme.Palette
 
-	// Create a simple gradient from primary to secondary across the text
+	// Create a gradient from primary to secondary across the text
 	colors := interpolateColors(string(p.Primary), string(p.Secondary), len(text))
 
 	var result string
@@ -85,7 +141,7 @@ func renderGradientTitle(theme Theme) string {
 		result += style.Render(string(ch))
 	}
 
-	return "🦞 " + result
+	return "dY◆z " + result
 }
 
 // interpolateColors creates a gradient of hex colors between two colors.
@@ -118,4 +174,16 @@ func hexToRGB(hex string) (int, int, int) {
 	var r, g, b int
 	fmt.Sscanf(hex, "%02x%02x%02x", &r, &g, &b)
 	return r, g, b
+}
+
+// repeatString creates a string of n copies of s.
+func repeatString(s string, n int) string {
+	if n <= 0 {
+		return ""
+	}
+	result := ""
+	for i := 0; i < n; i++ {
+		result += s
+	}
+	return result
 }

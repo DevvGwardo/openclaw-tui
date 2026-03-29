@@ -33,7 +33,7 @@ func getGlamourRenderer(width int) *glamour.TermRenderer {
 	}
 	glamourCache = r
 	glamourCacheW = width
-	return r
+	return glamourCache
 }
 
 // MsgRole identifies who sent a message.
@@ -64,6 +64,7 @@ type ToolCall struct {
 }
 
 // RenderMessage renders a chat message with the given theme and width.
+// Website-like card styling with clear visual hierarchy
 func RenderMessage(msg ChatMsg, theme Theme, width int) string {
 	switch msg.Role {
 	case RoleUser:
@@ -82,64 +83,80 @@ func RenderMessage(msg ChatMsg, theme Theme, width int) string {
 func renderUserMessage(msg ChatMsg, theme Theme, width int) string {
 	p := theme.Palette
 
-	// ── Header: clean, minimal ──
+	// Card header with avatar icon and name
+	avatar := lipgloss.NewStyle().
+		Background(p.Secondary).
+		Foreground(lipgloss.Color("#FFFFFF")).
+		Padding(0, 1).
+		Render("U")
+
 	name := lipgloss.NewStyle().
 		Foreground(p.Secondary).
 		Bold(true).
 		Render("You")
+
 	ts := lipgloss.NewStyle().
 		Foreground(p.FgMuted).
 		Render(msg.Timestamp.Format("15:04"))
 
-	headerGap := width - lipgloss.Width(name) - lipgloss.Width(ts) - 4
-	if headerGap < 1 {
-		headerGap = 1
-	}
-	header := name + strings.Repeat(" ", headerGap) + ts
+	header := fmt.Sprintf(" %s %s   %s", avatar, name, ts)
 
-	// ── Content ──
-	contentWidth := width - 4
+	// Content area with card styling
+	contentWidth := width - 6
 	if contentWidth < 20 {
 		contentWidth = 20
 	}
+
 	content := lipgloss.NewStyle().
 		Foreground(p.Fg).
 		Width(contentWidth).
 		Render(msg.Content)
 
-	// Wrap in a subtle card with left border accent
-	body := lipgloss.NewStyle().
+	// Card wrapper with rounded border and left accent
+	cardStyle := lipgloss.NewStyle().
+		Background(p.UserBg).
 		Foreground(p.Fg).
-		Padding(0, 2).
-		BorderLeft(true).
-		BorderStyle(lipgloss.Border{Left: "┃"}).
+		Border(lipgloss.RoundedBorder()).
 		BorderForeground(p.Secondary).
-		Width(width - 2).
+		Padding(1, 2).
+		Width(width - 2)
+
+	// Left accent bar effect
+	accentBar := lipgloss.NewStyle().
+		Background(p.Secondary).
+		Width(3).
+		Render("")
+
+	body := lipgloss.NewStyle().
+		Width(width - 5).
 		Render(content)
 
-	return "\n" + header + "\n" + body + "\n"
+	return "\n" + header + "\n" + cardStyle.Render(accentBar+body) + "\n"
 }
 
 func renderAssistantMessage(msg ChatMsg, theme Theme, width int) string {
 	p := theme.Palette
 
-	// ── Header: clean, minimal ──
+	// Card header with avatar icon and name
+	avatar := lipgloss.NewStyle().
+		Background(p.Primary).
+		Foreground(lipgloss.Color("#FFFFFF")).
+		Padding(0, 1).
+		Render("AI")
+
 	name := lipgloss.NewStyle().
 		Foreground(p.Primary).
 		Bold(true).
-		Render("🦞 OpenClaw")
+		Render("OpenClaw")
+
 	ts := lipgloss.NewStyle().
 		Foreground(p.FgMuted).
 		Render(msg.Timestamp.Format("15:04"))
 
-	headerGap := width - lipgloss.Width(name) - lipgloss.Width(ts) - 4
-	if headerGap < 1 {
-		headerGap = 1
-	}
-	header := name + strings.Repeat(" ", headerGap) + ts
+	header := fmt.Sprintf(" %s %s   %s", avatar, name, ts)
 
-	// ── Content ──
-	contentWidth := width - 4
+	// Content area
+	contentWidth := width - 6
 	if contentWidth < 20 {
 		contentWidth = 20
 	}
@@ -152,15 +169,15 @@ func renderAssistantMessage(msg ChatMsg, theme Theme, width int) string {
 			Render(msg.Content)
 		content += lipgloss.NewStyle().
 			Foreground(p.Primary).
-			Render("▌")
+			Render(" ◐")
 	} else {
 		content = renderGlamourMarkdown(msg.Content, contentWidth)
 	}
 
-	// Tool calls — use strings.Builder to avoid slice allocations
+	// Tool calls section
 	if len(msg.Tools) > 0 {
 		var sb strings.Builder
-		sb.Grow(len(msg.Tools) * 60)
+		sb.Grow(len(msg.Tools) * 80)
 		for i, tool := range msg.Tools {
 			if i > 0 {
 				sb.WriteString("\n")
@@ -170,59 +187,76 @@ func renderAssistantMessage(msg ChatMsg, theme Theme, width int) string {
 		content += "\n" + sb.String()
 	}
 
-	body := lipgloss.NewStyle().
+	// Card styling
+	cardStyle := lipgloss.NewStyle().
+		Background(p.AssistBg).
 		Foreground(p.Fg).
-		Padding(0, 2).
-		BorderLeft(true).
-		BorderStyle(lipgloss.Border{Left: "┃"}).
-		BorderForeground(p.Primary).
-		Width(width - 2).
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(p.AssistBorder).
+		Padding(1, 2).
+		Width(width - 2)
+
+	// Left accent bar
+	accentBar := lipgloss.NewStyle().
+		Background(p.AssistBorder).
+		Width(3).
+		Render("")
+
+	body := lipgloss.NewStyle().
+		Width(width - 5).
 		Render(content)
 
-	return "\n" + header + "\n" + body + "\n"
+	return "\n" + header + "\n" + cardStyle.Render(accentBar+body) + "\n"
 }
 
 func renderSystemMessage(msg ChatMsg, theme Theme, width int) string {
 	p := theme.Palette
 
-	// Centered, subtle divider style
+	// Centered, subtle divider with icon
+	icon := lipgloss.NewStyle().
+		Foreground(p.FgMuted).
+		Render("◆")
+
 	text := lipgloss.NewStyle().
 		Foreground(p.FgMuted).
 		Italic(true).
 		Render(msg.Content)
 
 	textW := lipgloss.Width(text)
-	sideLen := (width - textW - 2) / 2
+	sideLen := (width - textW - 6) / 2
 	if sideLen < 1 {
 		sideLen = 1
 	}
 	dash := lipgloss.NewStyle().
-		Foreground(p.BgSubtle).
+		Foreground(p.CardBorder).
 		Render(strings.Repeat("─", sideLen))
 
-	return "\n" + dash + " " + text + " " + dash + "\n"
+	return "\n" + dash + " " + icon + " " + text + " " + icon + " " + dash + "\n"
 }
 
 func renderErrorMessage(msg ChatMsg, theme Theme, width int) string {
 	p := theme.Palette
 
-	// ── Header ──
+	// Card header with error icon
+	avatar := lipgloss.NewStyle().
+		Background(p.Error).
+		Foreground(lipgloss.Color("#FFFFFF")).
+		Padding(0, 1).
+		Render("!")
+
 	name := lipgloss.NewStyle().
 		Foreground(p.Error).
 		Bold(true).
-		Render("✗ Error")
+		Render("Error")
+
 	ts := lipgloss.NewStyle().
 		Foreground(p.FgMuted).
 		Render(msg.Timestamp.Format("15:04"))
 
-	headerGap := width - lipgloss.Width(name) - lipgloss.Width(ts) - 4
-	if headerGap < 1 {
-		headerGap = 1
-	}
-	header := name + strings.Repeat(" ", headerGap) + ts
+	header := fmt.Sprintf(" %s %s   %s", avatar, name, ts)
 
-	// ── Content ──
-	contentWidth := width - 4
+	// Content
+	contentWidth := width - 6
 	if contentWidth < 20 {
 		contentWidth = 20
 	}
@@ -231,47 +265,76 @@ func renderErrorMessage(msg ChatMsg, theme Theme, width int) string {
 		Width(contentWidth).
 		Render(msg.Content)
 
-	body := lipgloss.NewStyle().
+	// Card with error styling
+	cardStyle := lipgloss.NewStyle().
+		Background(p.UserBg).
 		Foreground(p.Fg).
-		Padding(0, 2).
-		BorderLeft(true).
-		BorderStyle(lipgloss.Border{Left: "┃"}).
+		Border(lipgloss.RoundedBorder()).
 		BorderForeground(p.Error).
-		Width(width - 2).
+		Padding(1, 2).
+		Width(width - 2)
+
+	accentBar := lipgloss.NewStyle().
+		Background(p.Error).
+		Width(3).
+		Render("")
+
+	body := lipgloss.NewStyle().
+		Width(width - 5).
 		Render(content)
 
-	return "\n" + header + "\n" + body + "\n"
+	return "\n" + header + "\n" + cardStyle.Render(accentBar+body) + "\n"
 }
 
 func renderToolCall(tool ToolCall, theme Theme, width int) string {
+	p := theme.Palette
+
 	var icon string
 	var style lipgloss.Style
+	var iconBg lipgloss.Color
 
 	switch tool.Status {
 	case "running":
-		icon = "⏳"
+		icon = "▶"
 		style = theme.ToolRunning
+		iconBg = p.Warning
 	case "done":
 		icon = "✓"
 		style = theme.ToolDone
+		iconBg = p.Success
 	case "failed":
 		icon = "✗"
 		style = theme.ToolFailed
+		iconBg = p.Error
 	default:
-		icon = "⏳"
+		icon = "▶"
 		style = theme.ToolRunning
+		iconBg = p.Warning
 	}
 
-	header := style.Render(fmt.Sprintf("%s %s", icon, tool.Name))
+	iconBadge := lipgloss.NewStyle().
+		Background(iconBg).
+		Foreground(lipgloss.Color("#FFFFFF")).
+		Padding(0, 1).
+		Render(icon)
+
+	header := lipgloss.NewStyle().
+		Foreground(p.Fg).
+		Render(" " + tool.Name)
+
+	statusDot := style.Render("(" + tool.Status + ")")
+
+	toolLine := iconBadge + header + " " + statusDot
+
 	if tool.Output != "" {
 		output := theme.Muted.Width(width - 4).Render(tool.Output)
 		var sb strings.Builder
-		sb.WriteString(header)
+		sb.WriteString(toolLine)
 		sb.WriteString("\n")
 		sb.WriteString(output)
 		return sb.String()
 	}
-	return header
+	return toolLine
 }
 
 // renderGlamourMarkdown renders markdown content using the glamour library.

@@ -12,28 +12,29 @@ import (
 type BgMode string
 
 const (
-	BgOff       BgMode = "off"
-	BgStarfield BgMode = "starfield"
-	BgTunnel    BgMode = "tunnel"
-	BgPlasma    BgMode = "plasma"
-	BgFire      BgMode = "fire"
-	BgMatrix    BgMode = "matrix"
-	BgOcean     BgMode = "ocean"
-	BgCube      BgMode = "cube"
-	BgSkibidi   BgMode = "skibidi"
-	BgSigma     BgMode = "sigma"
-	BgNpc       BgMode = "npc"
-	BgOhio      BgMode = "ohio"
-	BgRizz      BgMode = "rizz"
-	BgGyatt     BgMode = "gyatt"
-	BgAmogus    BgMode = "amogus"
-	BgBussin    BgMode = "bussin"
-	BgAquarium  BgMode = "aquarium"
+	BgOff        BgMode = "off"
+	BgStarfield  BgMode = "starfield"
+	BgTunnel     BgMode = "tunnel"
+	BgPlasma     BgMode = "plasma"
+	BgFire       BgMode = "fire"
+	BgMatrix     BgMode = "matrix"
+	BgOcean      BgMode = "ocean"
+	BgCube       BgMode = "cube"
+	BgSkibidi    BgMode = "skibidi"
+	BgSigma      BgMode = "sigma"
+	BgNpc        BgMode = "npc"
+	BgOhio       BgMode = "ohio"
+	BgRizz       BgMode = "rizz"
+	BgGyatt      BgMode = "gyatt"
+	BgAmogus     BgMode = "amogus"
+	BgBussin     BgMode = "bussin"
+	BgAquarium   BgMode = "aquarium"
+	BgDotMatrix  BgMode = "dotmatrix"
 )
 
 // BgModes lists all available background modes in cycle order.
 var BgModes = []BgMode{BgOff, BgStarfield, BgTunnel, BgPlasma, BgFire, BgMatrix, BgOcean, BgCube,
-	BgSkibidi, BgSigma, BgNpc, BgOhio, BgRizz, BgGyatt, BgAmogus, BgBussin, BgAquarium}
+	BgSkibidi, BgSigma, BgNpc, BgOhio, BgRizz, BgGyatt, BgAmogus, BgBussin, BgAquarium, BgDotMatrix}
 
 // --- Pixel buffer for half-block rendering (color-intensive modes) ---
 
@@ -455,6 +456,9 @@ type BackgroundModel struct {
 	aquariumCrabs   []aquariumCrab
 	aquariumTasks   []string       // current task labels for crabs to display
 	aquariumFood    []aquariumFood // dropped food particles
+
+	// Dot Matrix state
+	dotMatrix *dotMatrixState
 }
 
 // NewBackgroundModel creates a new background renderer.
@@ -557,6 +561,8 @@ func (b *BackgroundModel) TickInterval() time.Duration {
 		return 0
 	case BgAquarium:
 		return 80 * time.Millisecond
+	case BgDotMatrix:
+		return 60 * time.Millisecond
 	case BgFire:
 		return 60 * time.Millisecond
 	case BgPlasma:
@@ -594,7 +600,7 @@ func (b *BackgroundModel) isBrailleMode() bool {
 // isPixelMode returns true if the mode uses the pixel buffer (half-block rendering).
 func (b *BackgroundModel) isPixelMode() bool {
 	switch b.mode {
-	case BgTunnel, BgPlasma, BgFire, BgOcean, BgSigma, BgOhio, BgRizz, BgBussin, BgAquarium:
+	case BgTunnel, BgPlasma, BgFire, BgOcean, BgSigma, BgOhio, BgRizz, BgBussin, BgAquarium, BgDotMatrix:
 		return true
 	}
 	return false
@@ -643,6 +649,8 @@ func (b *BackgroundModel) initMode() {
 		b.initBussin()
 	case BgAquarium:
 		b.initAquarium()
+	case BgDotMatrix:
+		b.initDotMatrix()
 	}
 }
 
@@ -1435,6 +1443,8 @@ func (b *BackgroundModel) updateAnimation() {
 		b.updateBussin()
 	case BgAquarium:
 		b.updateAquarium()
+	case BgDotMatrix:
+		b.updateDotMatrix()
 	}
 }
 

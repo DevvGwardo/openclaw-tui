@@ -7,22 +7,8 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// Braille spinner frames.
-var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
-
-// Fun waiting phrases.
-var waitingPhrases = []string{
-	"Thinking deeply...",
-	"Crafting a response...",
-	"Processing your request...",
-	"Analyzing the problem...",
-	"Gathering thoughts...",
-	"Working on it...",
-	"Almost there...",
-	"Crunching the details...",
-}
-
 // ActivityBarModel shows a streaming/waiting indicator.
+// Website-like: clean animated dots with progress feel
 type ActivityBarModel struct {
 	active    bool
 	startTime time.Time
@@ -30,6 +16,16 @@ type ActivityBarModel struct {
 	theme     Theme
 	width     int
 	phrase    int
+}
+
+// Fun waiting phrases.
+var waitingPhrases = []string{
+	"Thinking...",
+	"Processing...",
+	"Analyzing...",
+	"Working...",
+	"Loading...",
+	"Calculating...",
 }
 
 // NewActivityBarModel creates a new activity bar.
@@ -62,7 +58,7 @@ func (a *ActivityBarModel) Tick() {
 	if !a.active {
 		return
 	}
-	a.frame = (a.frame + 1) % len(spinnerFrames)
+	a.frame = (a.frame + 1) % 4
 
 	// Change phrase every ~5 seconds (50 ticks at 100ms)
 	elapsed := time.Since(a.startTime)
@@ -80,25 +76,54 @@ func (a *ActivityBarModel) SetWidth(w int) {
 }
 
 // View renders the activity bar.
+// Website-like: animated dots with typing effect
 func (a ActivityBarModel) View() string {
 	if !a.active {
 		return ""
 	}
 
-	spinner := lipgloss.NewStyle().
-		Foreground(a.theme.Palette.Primary).
+	p := a.theme.Palette
+
+	// Animated dots - website-like typing indicator
+	dotFrames := []string{"●   ", " ●  ", "  ● ", "   ●"}
+	dots := dotFrames[a.frame]
+
+	dotsStyle := lipgloss.NewStyle().
+		Foreground(p.Primary).
 		Bold(true).
-		Render(spinnerFrames[a.frame])
+		Render(dots)
 
 	phrase := lipgloss.NewStyle().
-		Foreground(a.theme.Palette.FgMuted).
-		Italic(true).
+		Foreground(p.FgMuted).
 		Render(waitingPhrases[a.phrase])
 
 	elapsed := time.Since(a.startTime).Truncate(time.Second)
-	timer := lipgloss.NewStyle().
-		Foreground(a.theme.Palette.FgMuted).
-		Render(fmt.Sprintf("(%s)", elapsed))
 
-	return fmt.Sprintf("   %s %s %s", spinner, phrase, timer)
+	// Progress bar effect
+	progress := ""
+	progressLen := 10
+	filled := (a.frame * progressLen) / 4
+	for i := 0; i < progressLen; i++ {
+		if i < filled {
+			progress += lipgloss.NewStyle().Foreground(p.Primary).Render("█")
+		} else {
+			progress += lipgloss.NewStyle().Foreground(p.BgSubtle).Render("░")
+		}
+	}
+
+	progressBar := lipgloss.NewStyle().
+		Foreground(p.FgMuted).
+		Render("[" + progress + "] " + elapsed.String())
+
+	// Center the content
+	content := fmt.Sprintf(" %s %s  %s", dotsStyle, phrase, progressBar)
+
+	// Wrap in a subtle bar
+	barStyle := lipgloss.NewStyle().
+		Background(p.BgSubtle).
+		Foreground(p.Fg).
+		Width(a.width - 2).
+		Padding(0, 1)
+
+	return barStyle.Render(content)
 }

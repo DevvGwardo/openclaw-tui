@@ -7,6 +7,7 @@ import (
 )
 
 // StatusBarModel is the bottom status bar.
+// Website-like: clean pills/badges for status info
 type StatusBarModel struct {
 	width      int
 	session    string
@@ -81,63 +82,130 @@ func (s *StatusBarModel) SetTheme(t Theme) {
 }
 
 // View renders the status bar.
+// Website-like: horizontal pill badges separated by dividers
 func (s StatusBarModel) View() string {
+	p := s.theme.Palette
+
+	// Connection status with icon
 	var connIcon string
+	var connBadge string
 	if s.connected {
-		connIcon = s.theme.StatusConnected.Render("●")
+		connIcon = lipgloss.NewStyle().Foreground(p.Success).Render("●")
+		connBadge = lipgloss.NewStyle().
+			Background(p.Success).
+			Foreground(lipgloss.Color("#FFFFFF")).
+			Padding(0, 1).
+			Render(connIcon + " CONNECTED")
 	} else {
-		connIcon = s.theme.StatusDisconnected.Render("○")
+		connIcon = lipgloss.NewStyle().Foreground(p.Error).Render("●")
+		connBadge = lipgloss.NewStyle().
+			Background(p.Error).
+			Foreground(lipgloss.Color("#FFFFFF")).
+			Padding(0, 1).
+			Render(connIcon + " DISCONNECTED")
 	}
 
-	sessionItem := s.theme.StatusItem.Render(s.session)
-	modelItem := s.theme.StatusItem.Render(s.model)
+	// Session pill
+	sessionBadge := lipgloss.NewStyle().
+		Background(p.BgSubtle).
+		Foreground(p.FgMuted).
+		Padding(0, 1).
+		Render("SESSION: " + s.session)
 
-	tokenStyle := s.tokenStyle()
+	// Model pill
+	modelBadge := lipgloss.NewStyle().
+		Background(p.BgSubtle).
+		Foreground(p.Primary).
+		Padding(0, 1).
+		Render("MODEL: " + s.model)
+
+	// Token bar with percentage
 	tokenPct := 0
 	if s.maxTokens > 0 {
 		tokenPct = s.tokens * 100 / s.maxTokens
 	}
-	tokenItem := tokenStyle.Render(fmt.Sprintf("%dk/%dk (%d%%)", s.tokens/1000, s.maxTokens/1000, tokenPct))
+	tokenColor := s.tokenColor()
+	tokenBar := lipgloss.NewStyle().
+		Background(p.BgSubtle).
+		Foreground(tokenColor).
+		Padding(0, 1).
+		Render(fmt.Sprintf("TOKENS: %d%%", tokenPct))
 
-	thinkItem := s.theme.StatusItem.Render(s.thinking)
+	// Thinking level pill
+	thinkBadge := lipgloss.NewStyle().
+		Background(p.BgSubtle).
+		Foreground(p.FgMuted).
+		Padding(0, 1).
+		Render("THINK: " + s.thinking)
 
-	var mouseItem string
-	if s.mouseMode {
-		mouseItem = s.theme.StatusItem.Render("scroll")
-	} else {
-		mouseItem = s.theme.StatusItem.Render("select")
-	}
+	// Mouse mode indicator
+	mouseIcon := "◎"
+	mouseBadge := lipgloss.NewStyle().
+		Background(p.BgSubtle).
+		Foreground(p.FgMuted).
+		Padding(0, 1).
+		Render("MOUSE: " + mouseIcon)
 
-	sep := s.theme.Muted.Render(" · ")
-	left := fmt.Sprintf(" %s %s%s%s%s%s", connIcon, sessionItem, sep, modelItem, sep, tokenItem)
-	right := fmt.Sprintf("%s%s%s ", mouseItem, sep, thinkItem)
+	// Separator
+	sep := lipgloss.NewStyle().
+		Foreground(p.CardBorder).
+		Render("│")
 
+	// Build left section
+	left := fmt.Sprintf(" %s %s %s %s %s", connBadge, sep, sessionBadge, sep, modelBadge)
+
+	// Build right section
+	right := fmt.Sprintf("%s %s %s %s ", tokenBar, sep, mouseBadge, sep, thinkBadge)
+
+	// Calculate spacing
 	gap := s.width - lipgloss.Width(left) - lipgloss.Width(right)
 	if gap < 0 {
 		gap = 0
 	}
 
-	padding := ""
-	for i := 0; i < gap; i++ {
-		padding += " "
-	}
+	padding := repeatStringStr(" ", gap)
 
 	line := left + padding + right
 
-	return s.theme.StatusBarStyle.Width(s.width).Render(line)
+	// Top border
+	topBorder := ""
+	if s.width > 2 {
+		topBorder = lipgloss.NewStyle().
+			Foreground(p.CardBorder).
+			Render("└" + repeatStringStr("─", s.width-2) + "┘")
+	}
+
+	// Status bar content
+	statusContent := lipgloss.NewStyle().
+		Background(p.BgSubtle).
+		Width(s.width).
+		Render(line)
+
+	return statusContent + "\n" + topBorder
 }
 
-func (s StatusBarModel) tokenStyle() lipgloss.Style {
+func (s StatusBarModel) tokenColor() lipgloss.Color {
 	if s.maxTokens == 0 {
-		return s.theme.TokenLow
+		return s.theme.Palette.FgMuted
 	}
 	pct := float64(s.tokens) / float64(s.maxTokens)
 	switch {
 	case pct >= 0.8:
-		return s.theme.TokenHigh
+		return s.theme.Palette.Error
 	case pct >= 0.5:
-		return s.theme.TokenMed
+		return s.theme.Palette.Warning
 	default:
-		return s.theme.TokenLow
+		return s.theme.Palette.Success
 	}
+}
+
+func repeatStringStr(s string, n int) string {
+	if n <= 0 {
+		return ""
+	}
+	result := ""
+	for i := 0; i < n; i++ {
+		result += s
+	}
+	return result
 }
