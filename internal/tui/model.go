@@ -1021,7 +1021,11 @@ func (m *Model) handleAgentEvent(agent *gateway.AgentEvent) {
 			})
 			m.layout()
 		}
-		m.streamBuf = data.Text
+		if data.Delta != "" {
+			m.streamBuf += data.Delta
+		} else {
+			m.streamBuf, _ = mergeStreamContent(m.streamBuf, data.Text)
+		}
 		m.chat.UpdateLastAssistant(m.streamBuf, true)
 
 	case "lifecycle":
@@ -1064,7 +1068,7 @@ func (m *Model) handleChatEvent(chat *gateway.ChatEvent) {
 			m.layout()
 		}
 		if chat.Message != nil {
-			m.streamBuf += chat.Message.Content
+			m.streamBuf, _ = mergeStreamContent(m.streamBuf, chat.Message.Content)
 			m.chat.UpdateLastAssistant(m.streamBuf, true)
 		}
 
